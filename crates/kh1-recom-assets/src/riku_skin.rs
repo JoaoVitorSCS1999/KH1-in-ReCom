@@ -628,12 +628,17 @@ const fn terra(name: &'static str, charge_end: f64, key_end: f64, last: f64, fal
 /// Terra's thrust on the ground (Fire's, Blizzard's fallbacks) and in the air; the raise (Thunder / Aero's, Cure's,
 /// Gravity / Stop's fallbacks).
 const TERRA_THRUST_G: [CastSource; 2] = [terra("315", 9.0, 13.0, 35.0, 0), terra("315", 9.0, 13.0, 35.0, 1)];
-const TERRA_RAISE_G: [CastSource; 3] = [terra("317", 10.0, 14.0, 36.0, 2), terra("317", 10.0, 14.0, 36.0, 3), terra("317", 10.0, 14.0, 36.0, 5)];
+const TERRA_RAISE_G: [CastSource; 3] = [terra("317", 13.0, 17.0, 36.0, 2), terra("317", 13.0, 17.0, 36.0, 3), terra("317", 13.0, 17.0, 36.0, 5)];
 /// The air rows play Terra's air clips (`316` the thrust, `318` the raise), with the blade in Riku's grip and the body at its
 /// stance height. The key moments (in Terra's 30 fps frames) were read from the retargeted hands: 315 and 316 thrust at
-/// 9..13 / 8..13, the raise at 10..14 (Checked (files)); that they read as a cast in game: Assumption.
+/// 9..13 / 8..13, the raise at 13..17 (Checked (files)); that they read as a cast in game: Assumption.
+/// 0.198.19 (fork owner: the spell effects not adjusted to Terra's casts, "algumas ficaram estranhas"): the raise was keyed
+/// 10..14, from its lowest point (Terra's frame 10: the blade 0.57 m behind the body at 0.88 m), so on KH1's release frame,
+/// where the DLL puts each shot's hand effect at the blade's end (Re:CoM's hand point `0x1401F0B30`), the blade was behind
+/// Riku, and up only 5 frames later (frames 12 -> 13). Keyed from 13 (the blade up in front, 1.51 m, held to 18) the
+/// swing up is the charge's end and the release meets the raised blade; KH1's release and free frames are unchanged.
 const TERRA_THRUST_A: [CastSource; 2] = [terra("316", 8.0, 13.0, 35.0, 0), terra("316", 8.0, 13.0, 35.0, 1)];
-const TERRA_RAISE_A: [CastSource; 3] = [terra("318", 10.0, 14.0, 36.0, 2), terra("318", 10.0, 14.0, 36.0, 3), terra("318", 10.0, 14.0, 36.0, 5)];
+const TERRA_RAISE_A: [CastSource; 3] = [terra("318", 13.0, 17.0, 36.0, 2), terra("318", 13.0, 17.0, 36.0, 3), terra("318", 13.0, 17.0, 36.0, 5)];
 
 /// One cast clip: its name suffix (`p002_` / `p003_` + it), its source motion, KH1's release frame, length and free
 /// frame (the recovery ends there; held after).
@@ -817,6 +822,17 @@ fn b_blade(b: &FxBones) -> i32 { b.wep0 }
 /// `recom-m13-recom-fx.md` § 8.4: ids, bones, sounds, loops Checked (files); how each looks and the fit: Assumption, not seen
 /// in game; the bones and offsets of `ex_1580` 3 / 7 are Re:CoM's own events'). Fire keeps Dark Firaga's, Cure the heal
 /// sparkle. `t`: an event to copy the unlisted fields from.
+/// 0.198.19: Thunder's vortex (`ex_1580` 11, levels 2 and 3) at the raised blade, not the left hand: Terra's raise sweeps
+/// the left hand 0.47 m behind the body while the blade goes up in front (Checked (files): the built clips' bones). On
+/// `Root` at [`thunder_vortex_at`], not on `wep0` (fork owner on the blade: "thundaga ainda ta estranho", "Vórtice na
+/// lâmina": the 60-tick program turned and swung with the blade into the recovery).
+/// Thunder's vortex point on `Root` (metres, model frame: +y up, +z the facing): the blade's grip (`wep0`) on KH1's release
+/// frame of Terra's raise as built on Riku, ground (`230`) (-0.11, 1.51, 0.52) and air (`236`) (0.00, 1.50, 0.41); Dark Riku's
+/// within 4 cm (Checked (files): `cast_effects_meet_the_gesture`). Held there, it does not follow the blade's swing.
+pub fn thunder_vortex_at(c: &CastClip) -> [f32; 3] {
+    if c.suffix == "236" { [0.0, 1.5, 0.41] } else { [-0.11, 1.51, 0.52] }
+}
+
 fn spell_events(spell: usize, c: &CastClip, t: &[u8; crate::eet::EVENT], bones: &FxBones) -> Vec<[u8; crate::eet::EVENT]> {
     let mut y180 = fx("ex_1580.dpx", 7, b_root, 0, None, 0.5);
     y180.rot = [0.0, 180.0, 0.0];
@@ -827,6 +843,8 @@ fn spell_events(spell: usize, c: &CastClip, t: &[u8; crate::eet::EVENT], bones: 
     g3.off = [0.0, 0.0, 0.1];
     let mut th3 = fx("ex_1580.dpx", 42, b_chest, -6, Some(40), 1.0);
     th3.rot = [90.0, 0.0, 0.0];
+    let mut vortex = fx("ex_1580.dpx", 11, b_root, 0, None, 0.8);
+    vortex.off = thunder_vortex_at(c);
     let mut out = Vec::new();
     for variant in 1..=6i32 {
         let level = (variant - 1) % 3 + 1;
@@ -836,8 +854,8 @@ fn spell_events(spell: usize, c: &CastClip, t: &[u8; crate::eet::EVENT], bones: 
             (2, false, 2) => vec![fx("ex_1580.dpx", 38, b_root, 0, None, 1.0), fx("ex_1580.dpx", 39, b_chest, 0, None, 1.0)],
             (2, false, _) => vec![fx("ex_1580.dpx", 38, b_root, 0, None, 1.5), fx("ex_1580.dpx", 39, b_chest, 0, None, 1.0), fx("ex_1580.dpx", 10, b_hand, 0, None, 0.7)],
             (3, false, 1) => vec![fx("ex_1580.dpx", 19, b_chest, -10, None, 1.0)],
-            (3, false, 2) => vec![fx("ex_1580.dpx", 19, b_chest, -10, None, 1.0), fx("ex_1580.dpx", 11, b_hand, 0, None, 0.8)],
-            (3, false, _) => vec![fx("ex_1580.dpx", 19, b_chest, -10, None, 1.0), fx("ex_1580.dpx", 11, b_hand, 0, None, 0.8), Fx { ..th3 }],
+            (3, false, 2) => vec![fx("ex_1580.dpx", 19, b_chest, -10, None, 1.0), Fx { ..vortex }],
+            (3, false, _) => vec![fx("ex_1580.dpx", 19, b_chest, -10, None, 1.0), Fx { ..vortex }, Fx { ..th3 }],
             (3, true, 1) => vec![fx("speed_break.dpx", 0, b_root, -6, None, 1.0)],
             (3, true, 2) => vec![fx("speed_break.dpx", 0, b_root, -6, None, 1.0), fx("speed_break.dpx", 5, b_root, -6, None, 1.0)],
             (3, true, _) => vec![fx("speed_break.dpx", 0, b_root, -6, None, 1.0), fx("speed_break.dpx", 5, b_root, -6, None, 1.0), fx("ex_1580.dpx", 8, b_blade, -24, Some(30), 0.5), fx("ex_1580.dpx", 11, b_root, 0, None, 0.8)],
@@ -2026,6 +2044,11 @@ pub fn build_event_packs(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::eg
     let mut out = vec![];
     for src in EVENT_PACKS {
         let Ok(ann) = crate::install::read_recom(arc, keys, &path(src, "ANN")) else { continue };
+        // 0.198.21: the level-up pack's pant panels in the model's bone order first ([`crate::pants_order`]), so the copy gets them too
+        let ann = match crate::pants_order::FIXED_PACKS.contains(&src) {
+            true => crate::pants_order::fix_bytes(&ann, &crate::mdl::RecomSkeleton::parse(&mdl)?)?.unwrap_or(ann),
+            false => ann,
+        };
         let a = Ann::parse(&ann)?;
         if a.slots.iter().filter_map(|s| s.clip.as_ref()).any(|c| c.bones as usize != bones) {
             continue;
@@ -2381,7 +2404,10 @@ mod tests {
         let packs = build_event_packs(&arc, &keys, &hair).unwrap();
         assert_eq!(packs.iter().map(|p| (p.0, p.1)).collect::<Vec<_>>(), EVENT_PACKS.map(|g| (g, g + EVENT_ALT)), "all eight");
         for (src, alt, bytes) in &packs {
-            let (a0, a1) = (Ann::parse(&install::read_recom(&arc, &keys, &path(*src, "ANN")).unwrap()).unwrap(), Ann::parse(bytes).unwrap());
+            // 0.198.21: PL4042 against its fixed pant order ([`crate::pants_order`])
+            let raw = install::read_recom(&arc, &keys, &path(*src, "ANN")).unwrap();
+            let raw = crate::pants_order::fix_bytes(&raw, &sk).unwrap().filter(|_| crate::pants_order::FIXED_PACKS.contains(src)).unwrap_or(raw);
+            let (a0, a1) = (Ann::parse(&raw).unwrap(), Ann::parse(bytes).unwrap());
             assert_eq!(a0.slots.len(), a1.slots.len(), "{alt}");
             for (s0, s1) in a0.slots.iter().zip(&a1.slots) {
                 let (Some(c0), Some(c1)) = (s0.clip.as_ref(), s1.clip.as_ref()) else { assert!(s0.clip.is_none() && s1.clip.is_none()); continue };
@@ -2956,6 +2982,69 @@ mod tests {
             for f in 0..c.frames as usize {
                 let t = c.sample(body, f as f64).t;
                 assert!((0..3).all(|k| (t[k] - st0[k]).abs() < 1e-3), "{n} frame {f}: the body left its stance position");
+            }
+        }
+    }
+
+    /// 0.198.19 (owner's install, `RECOM_GAME`; fork owner: the effects not adjusted to Terra's casts, "algumas ficaram
+    /// estranhas"): on Riku's and Dark Riku's built casts, from KH1's release frame to the key moment's end, the blade (`wep0`,
+    /// where Thunder's vortex sits; the DLL's shots start at its end) and the blade hand are in front of the chest; on the
+    /// raise (Thunder / Aero, Cure, Gravity / Stop) the blade is up over the shoulders; Blizzard's left-hand shard (level 3)
+    /// starts in front. The model faces +z (its toes, Checked (files)). The raise keyed 10..14 failed this (the blade 0.57 m
+    /// behind the body on the release). Thunder's vortex point is within 6 cm of the grip on the release.
+    #[test]
+    fn cast_effects_meet_the_gesture() {
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let rd = |p: &str| install::read_recom(&arc, &keys, p).unwrap();
+        let rs = RecomSkeleton::parse(&rd("PLAYER/0101/PL0101.MDL")).unwrap();
+        let ds = RecomSkeleton::parse(&rd("PLAYER/0201/PL0201.MDL")).unwrap();
+        let ss = RecomSkeleton::parse(&rd("PLAYER/0001/PL0001.MDL")).unwrap();
+        let ann = Ann::parse(&rd("PLAYER/0101/PL0101.ANN")).unwrap();
+        let stance = ann.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == RIKU_STANCE)).cloned();
+        let (tsk, tclips) = crate::terra::read_terra(&g, &keys).unwrap();
+        let get = |_: u16, _: &str| -> Result<Clip> { bad("none") };
+        let ctx = CastCtx { get: &get, riku: &rs, dark: &ds, sora: &ss, stance: stance.as_ref(), ansem: None, terra: Some((&tsk, &tclips)) };
+        const RAISE: [&str; 6] = ["230", "231", "232", "236", "237", "238"];
+        for (who, sk, clips) in [("Riku", &rs, riku_cast_clips(&ctx).unwrap()), ("Dark Riku", &ds, dark_cast_clips(&ctx).unwrap())] {
+            let b = |n: &str| sk.find(n).unwrap_or_else(|| panic!("{who}: no {n}"));
+            let (chest, blade, hand, lh, collar) = (b("chest1"), b("wep0"), b("r_hand"), b("l_hand"), b("r_collar"));
+            for (c, cl) in CAST_CLIPS.iter().zip(&clips) {
+                if c.is_windup() {
+                    continue;
+                }
+                let r = c.release as usize;
+                let to = (c.release + (c.source().key_end - c.source().charge_end) / (c.source().fps / 60.0)) as usize;
+                let mut worst = (f64::MAX, f64::MAX, 0usize);
+                for f in r..=to.min(cl.frames as usize - 1) {
+                    let w = crate::kh2_hair::tests::posed_world(sk, cl, f as f64);
+                    let ahead = (w[blade].t[2] - w[chest].t[2]).min(w[hand].t[2] - w[chest].t[2]);
+                    let up = w[blade].t[1] - w[collar].t[1];
+                    if ahead < worst.0 {
+                        worst = (ahead, worst.1, f);
+                    }
+                    worst.1 = worst.1.min(up);
+                }
+                // Thunder's vortex (Root, [`thunder_vortex_at`]) at the grip on the release; Root unturned, so its frame is the model's.
+                if matches!(c.suffix, "230" | "236") {
+                    let w = crate::kh2_hair::tests::posed_world(sk, cl, c.release);
+                    let id = (0..3).all(|i| (0..3).all(|j| (w[0].r[i][j] - if i == j { 1.0 } else { 0.0 }).abs() < 1e-3));
+                    assert!(id, "{who} {}: Root turned", c.suffix);
+                    let v = thunder_vortex_at(c);
+                    let d = (0..3).map(|k| (w[blade].t[k] - w[0].t[k] - v[k] as f64).powi(2)).sum::<f64>().sqrt();
+                    eprintln!("{who} {}: the vortex {d:.3} m from the grip on the release", c.suffix);
+                    assert!(d < 0.06, "{who} {}: the vortex {d:.3} m from the grip", c.suffix);
+                }
+                eprintln!("{who} {}: blade / hand at least {:.2} m ahead of the chest (frame {}), blade {:+.2} m over the shoulder", c.suffix, worst.0, worst.2, worst.1);
+                assert!(worst.0 > 0.1, "{who} {}: the blade or its hand {:.2} m ahead of the chest at frame {}", c.suffix, worst.0, worst.2);
+                if RAISE.contains(&c.suffix) {
+                    assert!(worst.1 > 0.0, "{who} {}: the raised blade {:.2} m under the shoulder", c.suffix, worst.1);
+                }
+                if matches!(c.suffix, "229" | "235") {
+                    let w = crate::kh2_hair::tests::posed_world(sk, cl, c.release);
+                    assert!(w[lh].t[2] - w[chest].t[2] > 0.1, "{who} {}: Blizzard's left hand behind on the release", c.suffix);
+                }
             }
         }
     }

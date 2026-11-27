@@ -194,6 +194,28 @@ pub fn riku_shortcuts_set() -> bool {
     unsafe { rd::<u8>(s + BLOCK_FIRST + m::off::SPARE) & crate::unlocks::SHORTCUTS_SET != 0 }
 }
 
+/// 0.198.18: Riku's Dark Mode slots (`crate::riku::dark_block`) and whether they were set up; None when his MP isn't
+/// live.
+pub fn riku_dark_shortcuts() -> Option<([u8; 3], bool)> {
+    use crate::riku::dark_block as d;
+    let s = save().filter(|_| riku_live())?;
+    // SAFETY: inside the 0x2AD4-byte save block (dark_block::LAST < 0x2818).
+    unsafe { Some((rd(s + d::FIRST + d::SLOTS), rd::<u8>(s + d::FIRST + d::FLAGS) & d::SET != 0)) }
+}
+
+/// Writes Riku's Dark Mode slots and marks them set up. False when his MP isn't live.
+pub fn set_riku_dark_shortcuts(slots: [u8; 3]) -> bool {
+    use crate::riku::dark_block as d;
+    let Some(s) = save().filter(|_| riku_live()) else { return false };
+    // SAFETY: as above.
+    unsafe {
+        wr(s + d::FIRST + d::SLOTS, slots);
+        let f = s + d::FIRST + d::FLAGS;
+        wr(f, rd::<u8>(f) | d::SET);
+    }
+    true
+}
+
 /// (MP, max MP, charge), or None when MP isn't live.
 pub fn current() -> Option<(i32, i32, u16)> {
     with_state(|mp| mp.view())

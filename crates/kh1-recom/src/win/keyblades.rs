@@ -161,6 +161,14 @@ const PROMPT_BAR: u32 = 0x000D_EC60;
 const CAMP_PRESS: u32 = 0x0011_1AE0;
 /// Square, as the deck page's state 0x30 reads it (`0x1400DBCE6`).
 const SQUARE: u32 = 0x80;
+/// 0.198.18: Re:CoM's Sleights page's tab keys (`0x1400EB7E0` state 4, `0x140111A70(camp, mask, 0)`, Left index − 1,
+/// Right + 1), as the list's Up `0x101000` / Down `0x204000`. Checked (decomp). The low bits are the PS2-order D-pad
+/// (0x8000 Left, 0x2000 Right); Assumption: the high bits are the stick, as in Up / Down.
+const LEFT: u32 = 0x40_8000;
+const RIGHT: u32 = 0x80_2000;
+/// Riku's D Mode card (Re:CoM's learned test answers it once `WORLD00/2102` gives it; the workspace's
+/// `recom-riku-sleights.md` § 1-2).
+const D_MODE: u16 = 0x6D;
 
 // Re:CoM data (Steam addresses).
 /// The message tables (`CCtdList` owner) passed to `0x140240160`.
@@ -1251,6 +1259,14 @@ static OPEN: Mutex<Option<Session>> = Mutex::new(None);
 // ---------------------------------------------------------------------------------------------
 // The pages
 
+/// 0.198.18: Riku's Dark Mode shortcuts on his Customize page (`crate::riku::dark_block`): its slots, Dark Riku's
+/// learned sleights and its picker (his spells, those sleights, the King's two Dark Riku can start).
+struct DarkSet {
+    slots: [u8; 3],
+    sleights: Vec<u16>,
+    picks: Vec<customize::Pick>,
+}
+
 /// What a page lists.
 enum Content {
     /// The Keyblade list, shown from the Items page's Keyblade slot (that page's content waits in
@@ -1267,6 +1283,11 @@ enum Content {
         sleights: Vec<u16>,
         picks: Vec<customize::Pick>,
         picking: Option<usize>,
+        /// 0.198.18: Riku's Dark Mode set (slot indices 3..5), once Re:CoM has taught him D Mode (card 0x6D).
+        dark: Option<Box<DarkSet>>,
+        /// 0.198.18: the list shows the Dark Mode set instead of Riku's own (Left / Right, as Re:CoM's Sleights page
+        /// switches its tabs, `0x1400EB7E0` state 4). The list keeps KH1's three rows either way.
+        dark_shown: bool,
     },
     /// M8 stage 8a.2: KH1's pause-menu Items screen (`crate::items_page`) on Sora's inventory in
     /// our save block (`win::items`). `inv`, `ctx` and `rows` are read again after every change.
@@ -1422,14 +1443,26 @@ impl Page {
                 let slots = super::mp::riku_shortcuts().unwrap_or([0; 3]);
                 // His six and (0.152.0) Dark Riku's, each once (a slot starts what the one in play takes).
                 // 0.198.15: only those Re:CoM has taught (`riku_learned_sleights`).
+                // 0.198.18: his own list only. Dark Riku's own sleights (0x5F..0x61, 0x65) are refused by Riku's own sleight
+                // start (`0x140216AB0`, `crate::riku::SLEIGHTS`): they are offered in the Dark Mode set alone. A slot that
+                // already holds one keeps its byte and shows greyed (`customize::unequipped`).
                 let mut sleights: Vec<u16> = super::command_menu::riku_learned_sleights(false);
-                sleights.extend(super::command_menu::riku_learned_sleights(true));
-                sleights.sort_unstable();
-                sleights.dedup();
                 // 0.150.0: the King's Party sleights too (0.198.16: once Re:CoM has taught them, B11).
                 sleights.extend(super::party::learned_ids().into_iter().filter(|&id| crate::party::index(id).is_some_and(|i| crate::party::ALL[i].cards.contains(&crate::party::card::KING))));
                 let picks = customize::picks(levels, &sleights);
-                (Content::Customize { levels, slots, sleights, picks, picking: None }, list::open_on(customize::SLOTS as i32, 0))
+                // 0.198.18: Dark Mode's own set once Re:CoM has taught him D Mode: its own learned test (`0x14023AB00`) on
+                // card 0x6D, which Re:CoM gives in `WORLD00/2102` step 170 (the workspace's `recom-riku-sleights.md` § 1-2).
+                // Development builds only (feature `dev`, `tools/dev-install.sh`): `all_unlock = on` shows it from
+                // the start; a released DLL never does (fork owner: "não vai chegar de jeito nenhum isso para o pessoal").
+                let d_mode = super::abilities::sleight_learned_fn()(D_MODE) & 0xFF != 0;
+                let dark = (d_mode || (cfg!(feature = "dev") && super::settings().all_unlock)).then(|| {
+                    let mut sleights = super::command_menu::riku_learned_sleights(true);
+                    let slots = super::command_menu::riku_dark_shortcuts(&sleights);
+                    sleights.extend(super::party::learned_ids().into_iter().filter(|id| crate::riku::DARK_KING.contains(id)));
+                    let picks = customize::picks(levels, &sleights);
+                    Box::new(DarkSet { slots, sleights, picks })
+                });
+                (Content::Customize { levels, slots, sleights, picks, picking: None, dark, dark_shown: false }, list::open_on(customize::SLOTS as i32, 0))
             }
             sub::Row::Customize => {
                 let (levels, slots) = super::command_menu::spell_view();
@@ -1437,7 +1470,7 @@ impl Page {
                 let mut sleights = super::abilities::equipped_sleights();
                 sleights.extend(super::party::learned_ids());
                 let picks = customize::picks(levels, &sleights);
-                (Content::Customize { levels, slots, sleights, picks, picking: None }, list::open_on(customize::SLOTS as i32, 0))
+                (Content::Customize { levels, slots, sleights, picks, picking: None, dark: None, dark_shown: false }, list::open_on(customize::SLOTS as i32, 0))
             }
             sub::Row::Items => {
                 let content = Content::Items { screen: ip::Screen::new(), msg: None, inv: Default::default(), ctx: Default::default(), rows: Vec::new() };
@@ -1467,7 +1500,10 @@ impl Page {
         p.redraw();
         match &p.content {
             Content::Keyblades { .. } => {}
-            Content::Customize { levels, slots, sleights, .. } => log(&format!("customize: page opened: spell levels {levels:?}, shortcut slots {slots:x?} (0 none, 1..=7 spell + 1, else a sleight's Re:CoM id), equipped sleights {sleights:x?}")),
+            Content::Customize { levels, slots, sleights, dark, .. } => log(&format!(
+                "customize: page opened: spell levels {levels:?}, shortcut slots {slots:x?} (0 none, 1..=7 spell + 1, else a sleight's Re:CoM id), equipped sleights {sleights:x?}{}",
+                dark.as_ref().map_or(String::new(), |d| format!("; Dark Mode slots {:x?}, Dark Riku's sleights {:x?}", d.slots, d.sleights))
+            )),
             Content::Items { inv, ctx, .. } => log(&format!(
                 "items page: opened: slots {:?} (of {}), stock {:?}, HP below max {}, MP below max {}{}",
                 &inv.slots[..(inv.slot_count as usize).min(crate::items::MAX_SLOTS)],
@@ -1537,19 +1573,68 @@ impl Page {
         }
     }
 
+    /// Customize: the slot index of list row `row` (0..2): 3..5 while Riku's Dark Mode set is shown.
+    fn cz_index(&self, row: usize) -> usize {
+        match &self.content {
+            Content::Customize { dark: Some(_), dark_shown: true, .. } => row % customize::SLOTS + customize::SLOTS,
+            _ => row,
+        }
+    }
+
+    /// Customize: slot `idx`'s byte and the sleights its picker offers (3..5: Riku's Dark Mode set).
+    fn cz_slot(&self, idx: usize) -> Option<(u8, &[u16])> {
+        let Content::Customize { slots, sleights, dark, .. } = &self.content else { return None };
+        match idx.checked_sub(customize::SLOTS) {
+            None => slots.get(idx).map(|&b| (b, sleights.as_slice())),
+            Some(j) => dark.as_ref().and_then(|d| d.slots.get(j).map(|&b| (b, d.sleights.as_slice()))),
+        }
+    }
+
+    /// Customize: the picker of slot row `k`.
+    fn cz_picks(&self, k: usize) -> &[customize::Pick] {
+        match &self.content {
+            Content::Customize { dark: Some(d), .. } if k >= customize::SLOTS => &d.picks,
+            Content::Customize { picks, .. } => picks,
+            _ => &[],
+        }
+    }
+
+    /// 0.198.18: Left / Right on Riku's slot list with the Dark Mode set: the other set, its rows rebuilt, the cursor on
+    /// the same row, sound 1; wrapping (two sets), as Re:CoM's Sleights page switches its tabs (`0x1400EB7E0` state 4:
+    /// `0x140111A70(camp, 0x408000 / 0x802000)`, index ∓1 with wrap, sound 1, draw mode 10). Returns whether it switched.
+    unsafe fn switch_set(&mut self, left: bool) -> bool {
+        let Content::Customize { dark: Some(_), dark_shown, picking: None, .. } = &mut self.content else { return false };
+        *dark_shown = !*dark_shown;
+        let shown = *dark_shown;
+        sound(1);
+        self.redraw();
+        self.help();
+        log(&format!(
+            "customize: Riku: {} set shown ({}); rows: Re:CoM's {}",
+            if shown { "Dark Mode" } else { "Riku's" },
+            if left { "Left" } else { "Right" },
+            if shown { "row 0x12F (red plate, Dark Riku's wing)" } else { "blue magic row 0x133" }
+        ));
+        true
+    }
+
     /// The text of list row `idx`.
     fn row_text(&self, idx: usize) -> Vec<u8> {
         match &self.content {
             // SAFETY: Re:CoM's card-name call (reads its message tables).
             Content::Keyblades { cards, .. } => unsafe { blade_name(cards[idx]) },
-            Content::Customize { levels, picks, picking: Some(_), .. } => pick_word(picks.get(idx).copied().flatten(), levels),
+            Content::Customize { levels, picking: Some(k), .. } => pick_word(self.cz_picks(*k).get(idx).copied().flatten(), levels),
             // Owner, 2026-11-04: the bound spell's or sleight's name beside the button prompt
             // (the status panel's words); an empty slot shows the button alone.
-            Content::Customize { levels, slots, picking: None, .. } => {
+            Content::Customize { levels, picking: None, .. } => {
                 let glyphs = button_glyphs(ROW_FONT);
-                let label = customize::text::slot_label(idx, glyphs, super::command_menu::confirm_is_circle());
-                let name = slots.get(idx).and_then(|&b| cm::shortcut::slot_of(b)).map(|p| pick_word(Some(p), levels));
-                customize::text::slot_row(label, name.as_deref(), glyphs)
+                let circle = super::command_menu::confirm_is_circle();
+                // 0.198.18: Riku's Dark Mode set's rows say so ("Dark" + the button); an empty slot reads "None"
+                // (`customize::text::slot_row`, KH1's `0x140302950`), on Sora's page too (this same code).
+                let idx = self.cz_index(idx);
+                let label = if idx >= customize::SLOTS { customize::text::dark_slot_label(idx - customize::SLOTS, glyphs, circle) } else { customize::text::slot_label(idx, glyphs, circle).to_vec() };
+                let name = self.cz_slot(idx).and_then(|(b, _)| cm::shortcut::slot_of(b)).map(|p| pick_word(Some(p), levels));
+                customize::text::slot_row(&label, name.as_deref(), glyphs)
             }
             Content::Items { rows, .. } => rows.get(idx).map_or_else(|| ip::text::NONE.to_vec(), |r| item_label(r.label)),
             Content::Abilities { rows, .. } => match rows.get(idx).map(|r| r.label) {
@@ -1578,7 +1663,7 @@ impl Page {
             Content::Items { rows, .. } => rows.get(idx).is_some_and(|r| r.grey),
             Content::Abilities { rows, .. } => rows.get(idx).is_some_and(|r| r.grey),
             // M12 step 6: a slot whose sleight is no longer equipped.
-            Content::Customize { slots, sleights, picking: None, .. } => slots.get(idx).is_some_and(|&b| customize::unequipped(b, sleights).is_some()),
+            Content::Customize { picking: None, .. } => self.cz_slot(self.cz_index(idx)).is_some_and(|(b, sl)| customize::unequipped(b, sl).is_some()),
             _ => false,
         }
     }
@@ -1591,7 +1676,9 @@ impl Page {
         match &self.content {
             Content::Items { rows, .. } => rows.get(idx).map_or(kb::row_look::RED, |r| ip::row_look(r.label, item_row)),
             Content::Abilities { .. } => ap::ROW_LOOK,
-            Content::Customize { picks, picking, .. } => customize::row_look(picking.is_some(), picks.get(idx).copied().flatten()),
+            // 0.198.18: the slot list's rows by set (Riku's Dark Mode set: Re:CoM's row with Dark Riku's wing).
+            Content::Customize { picking: None, .. } => customize::slot_look(self.cz_index(idx)),
+            Content::Customize { picking, .. } => customize::row_look(picking.is_some(), picking.and_then(|k| self.cz_picks(k).get(idx).copied().flatten())),
             Content::Keyblades { .. } => kb::row_look::RED,
         }
     }
@@ -1633,7 +1720,7 @@ impl Page {
     fn marked(&self, idx: usize) -> bool {
         match &self.content {
             Content::Keyblades { cards, equipped } => cards.iter().position(|c| c == equipped) == Some(idx),
-            Content::Customize { slots, picks, picking: Some(k), .. } => customize::row_of(picks, slots[*k]) == Some(idx),
+            Content::Customize { picking: Some(k), .. } => self.cz_slot(*k).is_some_and(|(b, _)| customize::row_of(self.cz_picks(*k), b) == Some(idx)),
             Content::Customize { picking: None, .. } => false,
             Content::Items { .. } => false,
             Content::Abilities { rows, .. } => rows.get(idx).is_some_and(|r| r.marked),
@@ -1653,8 +1740,11 @@ impl Page {
                     .unwrap_or_else(|| [String::new(), String::new(), String::new()]);
                 (text::STAT_LABELS, values.map(|v| kb::c_text(&v)))
             }
-            Content::Customize { levels, slots, .. } => {
-                let v = |k: usize| pick_word(cm::shortcut::slot_of(slots[k]), levels);
+            Content::Customize { levels, picking, .. } => {
+                // 0.198.18: the set of the row (or the picker's slot) the cursor is on.
+                let at = picking.unwrap_or(self.cz_index(self.list.cursor.max(0) as usize));
+                let first = if at >= customize::SLOTS { customize::SLOTS } else { 0 };
+                let v = |k: usize| pick_word(self.cz_slot(first + k).and_then(|(b, _)| cm::shortcut::slot_of(b)), levels);
                 (customize::text::slot_labels(button_glyphs(ROW_FONT), super::command_menu::confirm_is_circle()), [v(0), v(1), v(2)])
             }
             // Sora's Keyblade slot: the equipped Keyblade's numbers, as the Keyblade list shows them.
@@ -1676,10 +1766,17 @@ impl Page {
     unsafe fn help(&self) {
         let t: &[u8] = match &self.content {
             Content::Keyblades { .. } => text::PAGE_HELP,
-            Content::Customize { picking: Some(k), .. } => customize::text::pick_help(*k, help_glyphs(self.p()), super::command_menu::confirm_is_circle()),
-            Content::Customize { slots, sleights, picking: None, .. } if slots.get(self.list.cursor.max(0) as usize).is_some_and(|&b| customize::unequipped(b, sleights).is_some()) => {
-                slots.get(self.list.cursor.max(0) as usize).and_then(|&b| customize::unequipped(b, sleights)).map_or(customize::text::UNEQUIPPED_HELP, customize::text::unequipped_help)
+            // 0.198.18: the Dark Mode set's picker names it.
+            Content::Customize { picking: Some(k), .. } if *k >= customize::SLOTS => customize::text::dark_pick_help(*k - customize::SLOTS, help_glyphs(self.p()), super::command_menu::confirm_is_circle()),
+            Content::Customize { picking: Some(k), .. } => customize::text::pick_help(*k % customize::SLOTS, help_glyphs(self.p()), super::command_menu::confirm_is_circle()),
+            Content::Customize { picking: None, .. } if self.cz_slot(self.cz_index(self.list.cursor.max(0) as usize)).is_some_and(|(b, sl)| customize::unequipped(b, sl).is_some()) => {
+                self.cz_slot(self.cz_index(self.list.cursor.max(0) as usize)).and_then(|(b, sl)| customize::unequipped(b, sl)).map_or(customize::text::UNEQUIPPED_HELP, customize::text::unequipped_help)
             }
+            // 0.198.18: the Dark Mode set (shown with Left / Right) names it and the way back; Riku's own, the way there.
+            Content::Customize { picking: None, .. } if self.cz_index(self.list.cursor.max(0) as usize) >= customize::SLOTS => {
+                customize::text::dark_slot_help(self.list.cursor.max(0) as usize % customize::SLOTS, help_glyphs(self.p()), super::command_menu::confirm_is_circle())
+            }
+            Content::Customize { picking: None, dark: Some(_), .. } => customize::text::switch_slot_help(self.list.cursor.max(0) as usize, help_glyphs(self.p()), super::command_menu::confirm_is_circle()),
             Content::Customize { picking: None, .. } => customize::text::slot_help(self.list.cursor.max(0) as usize, help_glyphs(self.p()), super::command_menu::confirm_is_circle()),
             Content::Items { screen, rows, msg, .. } => screen.help(rows, self.list.cursor, *msg),
             Content::Abilities { msg: Some(m), .. } => m,
@@ -1938,9 +2035,12 @@ impl Page {
 
     /// Customize: the list shows the slots (`slot` highlighted) or the picker for a slot.
     unsafe fn customize_mode(&mut self, picking: Option<usize>, cursor: i32) {
-        let Content::Customize { picking: p, picks, .. } = &mut self.content else { return };
+        let count = match picking {
+            Some(k) => self.cz_picks(k).len() as i32,
+            None => customize::SLOTS as i32,
+        };
+        let Content::Customize { picking: p, .. } = &mut self.content else { return };
         *p = picking;
-        let count = if picking.is_some() { picks.len() as i32 } else { customize::SLOTS as i32 };
         self.list = list::open_on(count, cursor);
         self.redraw();
         self.help();
@@ -1978,11 +2078,34 @@ impl Page {
                 self.redraw();
                 log(&format!("keyblades: equipped card {card:#x} (save byte {:#x})", kb::save_byte_for(card)));
             }
-            Content::Customize { picking: None, picks, .. } => {
-                // KH1's slot list → its picker, on the picker's last row (`0x142E9A040`).
-                let at = customize::picker_cursor(LAST_PICK.load(Ordering::Relaxed) as i32, picks.len() as i32);
+            Content::Customize { picking: None, .. } => {
+                // KH1's slot list → its picker, on the picker's last row (`0x142E9A040`). 0.198.18: the set on screen.
+                let k = self.cz_index(cursor.max(0) as usize);
+                let at = customize::picker_cursor(LAST_PICK.load(Ordering::Relaxed) as i32, self.cz_picks(k).len() as i32);
                 sound(2);
-                self.customize_mode(Some(cursor as usize), at);
+                self.customize_mode(Some(k), at);
+            }
+            Content::Customize { picking: Some(k), dark: Some(d), levels, .. } if *k >= customize::SLOTS => {
+                // 0.198.18: Riku's Dark Mode set.
+                let (j, old, levels) = (*k - customize::SLOTS, d.slots, *levels);
+                let pick = d.picks.get(cursor as usize).copied().flatten();
+                let new = customize::set(old, j, pick);
+                if super::mp::set_riku_dark_shortcuts(new) {
+                    if let Content::Customize { dark: Some(d), .. } = &mut self.content {
+                        d.slots = new;
+                    }
+                    sound(2);
+                    let name = |p: customize::Pick| match p {
+                        None => "None".to_string(),
+                        Some(cm::shortcut::Slot::Spell(s)) => crate::unlocks::level_name(s, levels[s as usize].clamp(1, 3)).to_string(),
+                        Some(cm::shortcut::Slot::Sleight(id)) => format!("sleight {} ({id:#x})", crate::sleights::name(id)),
+                    };
+                    log(&format!("customize: Riku's Dark Mode shortcut {} = {} (was {}); slots {new:?}", j + 1, name(pick), name(cm::shortcut::slot_of(old[j]))));
+                } else {
+                    sound(5);
+                    log("customize: the save block isn't there (MP not live); Dark Mode shortcut not set");
+                }
+                self.customize_mode(None, j as i32);
             }
             Content::Customize { picking: Some(k), picks, slots, levels, .. } => {
                 let (k, slots, levels) = (*k, *slots, *levels);
@@ -2128,7 +2251,7 @@ impl Page {
         }
         if let Content::Customize { picking: Some(k), .. } = self.content {
             sound(4);
-            self.customize_mode(None, k as i32);
+            self.customize_mode(None, (k % customize::SLOTS) as i32);
             return;
         }
         if let Content::Abilities { screen, msg, .. } = &mut self.content {
@@ -2167,6 +2290,15 @@ impl Page {
             return 0;
         }
         let dir = func::<CampDirFn>(CAMP_DIR);
+        // 0.198.18: Riku's two sets (Re:CoM's Sleights page's tab keys, `0x1400EB7E0` state 4).
+        if matches!(self.content, Content::Customize { dark: Some(_), picking: None, .. }) {
+            if dir(camp, LEFT, 0) != 0 && self.switch_set(true) {
+                return 0;
+            }
+            if dir(camp, RIGHT, 0) != 0 && self.switch_set(false) {
+                return 0;
+            }
+        }
         let mut pad = list::Pad::default();
         if dir(camp, 0x10_1000, 0) != 0 {
             pad.up = true;

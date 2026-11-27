@@ -1156,6 +1156,11 @@ pub fn riku_spell_levels() -> [u8; crate::command_menu::spell::COUNT] {
     if !super::magic::installed() {
         return [0; crate::command_menu::spell::COUNT];
     }
+    // 0.198.18, development builds only (`settings::DEV_KEYS`; fork owner, 2026-11-27: "quero testar as magias habilita"):
+    // `kh1_all_spells = on` gives Riku all seven at level 3 too, as it does Sora (not written to the save).
+    if cfg!(feature = "dev") && ALL_SPELLS.load(Ordering::Relaxed) {
+        return [3; crate::command_menu::spell::COUNT];
+    }
     // SAFETY: a read inside Re:CoM's save block.
     let l = unsafe { super::unlocks::riku_levels() };
     let mut out = [0u8; crate::command_menu::spell::COUNT];
@@ -1167,9 +1172,13 @@ pub fn riku_spell_levels() -> [u8; crate::command_menu::spell::COUNT] {
 
 unsafe fn riku_world(pl: usize) -> World {
     // 0.198.15: only what Re:CoM has taught him (none before the Ansem tutorial's end), as Re:CoM's Sleights List.
-    let ids = riku_learned_sleights(mv::is_main_dark_riku(pl));
+    let dark = mv::is_main_dark_riku(pl);
+    let ids = riku_learned_sleights(dark);
     let mut shortcuts = super::mp::riku_shortcuts().unwrap_or([0; 3]);
-    if let Some(f) = crate::riku::fill_shortcuts(shortcuts, &ids).filter(|_| !super::mp::riku_shortcuts_set()) {
+    // 0.198.18: Dark Mode has its own three slots (filled once from his with the Dark twins).
+    if dark {
+        shortcuts = riku_dark_shortcuts(&ids);
+    } else if let Some(f) = crate::riku::fill_shortcuts(shortcuts, &ids).filter(|_| !super::mp::riku_shortcuts_set()) {
         if super::mp::set_riku_shortcuts(f) {
             shortcuts = f;
             riku_learned_note();
@@ -1221,6 +1230,24 @@ unsafe fn riku_world(pl: usize) -> World {
         (w.party_learned, w.party_avail) = super::party::sets(pl);
     }
     w
+}
+
+/// 0.198.18: Dark Mode's three shortcut slots (`crate::riku::dark_block`); the first time (never set up), Riku's own
+/// set through `crate::riku::dark_fill` (Impulse → Dark Impulse ..), written once. `dark_learned`: Dark Riku's learned
+/// sleights ([`riku_learned_sleights`]`(true)`).
+pub(super) fn riku_dark_shortcuts(dark_learned: &[u16]) -> [u8; 3] {
+    let Some((slots, set)) = super::mp::riku_dark_shortcuts() else { return [0; 3] };
+    // As his own set's fill (Stage 414): nothing is written (nor marked set up) while Dark Riku has learned nothing.
+    if set || dark_learned.is_empty() {
+        return slots;
+    }
+    let riku = super::mp::riku_shortcuts().unwrap_or([0; 3]);
+    let f = crate::riku::dark_fill(riku, dark_learned);
+    if super::mp::set_riku_dark_shortcuts(f) {
+        log(&format!("riku: Dark Mode shortcut slots set up from his {riku:02x?}: {f:02x?}"));
+        return f;
+    }
+    slots
 }
 
 /// 0.198.15: Riku's (or Dark Riku's) sleights that Re:CoM's own test (`0x14023AB00`) answers as learned

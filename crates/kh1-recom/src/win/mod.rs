@@ -997,6 +997,9 @@ fn run(mod_dir: Option<PathBuf>) {
     if let Ok(mut g) = LOG_PATH.lock() {
         *g = Some(log_path);
     }
+    // 0.198.18: development builds (feature `dev`, `tools/dev-install.sh`) say so; a released DLL has no such line.
+    #[cfg(feature = "dev")]
+    log("DEV BUILD (feature dev): development-only debug aids are on (the all_unlock key, which also shows Riku's Dark Mode shortcut rows); never released");
     if !migrated.is_empty() {
         log(&format!("settings: {} updated: {}", ini_path.display(), migrated.join("; ")));
     }
