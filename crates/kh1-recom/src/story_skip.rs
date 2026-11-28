@@ -179,6 +179,28 @@ pub const RIKU_TUTORIAL_SESSION: &[Write] = &[Write::Bit1(0x0A, false), Write::B
 /// Frames in the battle room after which we stop writing and log (the script did not leave).
 pub const RIKU_TUTORIAL_GIVE_UP: u32 = 900;
 
+// 0.198.38 (fork owner, 2026-11-27, verbatim: "mas eu realmente não gostaria que fosse um skip, poderia ser uma fight com o
+// ansem mais fácil para as skills do Riku, ela skipa?"; to the plan "sim!"; on Ansem's HP: "24", i.e. 240): the battle is fought.
+// Its card lesson stays off ((1, 7) clear: Ansem's card AI `0x140424CB0` runs only while it is set, else `CHumanBoss`'s
+// `0x140199E10`; the lesson boxes come only after a Rapid Break), and the lesson's won-path writes, cards and "done" bit run when
+// Ansem is beaten, not on entry. The workspace's `knowledge/ReCoM/recom-riku-ansem-tutorial.md` § 5 (reverse-engineer, Checked
+// (decomp + files) unless tagged).
+
+/// Ansem's enemy id in room 1100 (`EN0122`; his Guardian `EN0123`). Checked (files).
+pub const RIKU_ANSEM_ID: i32 = 122;
+/// His HP for Riku's fight: 240 of Re:CoM's 320 (row 0 at B12; the owner's choice), Re:CoM's difficulty % kept on top.
+pub const RIKU_ANSEM_HP: i32 = 240;
+pub const RIKU_ANSEM_RECOM_HP: i32 = 320;
+/// Session writes every frame of the fight: the card lesson off ((1, 7)) and the script not done yet ((1, 2)).
+pub const RIKU_FIGHT_SESSION: &[Write] = &[Write::Bit1(0x07, false), Write::Bit1(0x02, false)];
+/// Frames Ansem's HP may sit at exactly 1 before it counts as his defeat (Re:CoM's 1-HP hold `0x140180920`, seen not read).
+pub const RIKU_ANSEM_HELD_AT_1: u32 = 120;
+
+/// Ansem's HP in Riku's fight from Re:CoM's own (its row's HP × the difficulty %): the same share of 240 / 320, rounded.
+pub fn riku_ansem_hp(recom_hp: i32) -> i32 {
+    ((recom_hp.max(0) as i64 * RIKU_ANSEM_HP as i64 + RIKU_ANSEM_RECOM_HP as i64 / 2) / RIKU_ANSEM_RECOM_HP as i64).max(1) as i32
+}
+
 /// Whether this battle request is Riku's tutorial to skip: Combat = KH1, Riku's story with his KH1 combat, world 0, 2102 → 1100.
 pub fn riku_tutorial(a: Ask, riku_kh1: bool) -> bool {
     a.kh1 && a.riku_story && riku_kh1 && a.world == WORLD_RIKU_TUTORIAL && a.room == RIKU_TUTORIAL_FROM && a.battle_room == RIKU_TUTORIAL_BATTLE
@@ -205,6 +227,7 @@ mod tests {
     #[test]
     fn rikus_tutorial_only_at_kh1_with_his_kh1_combat() {
         let a = Ask { kh1: true, riku_story: true, world: 0, room: 2102, battle_room: 1100 };
+        assert_eq!((riku_ansem_hp(320), riku_ansem_hp(240), riku_ansem_hp(0)), (240, 180, 1));
         assert!(riku_tutorial(a, true));
         assert!(!riku_tutorial(a, false));
         assert!(!riku_tutorial(Ask { kh1: false, ..a }, true));

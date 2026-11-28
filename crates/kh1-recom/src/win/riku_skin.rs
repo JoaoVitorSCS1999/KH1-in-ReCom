@@ -8,6 +8,9 @@
 //!   (`0x1405A6910 + 12`) and their motion pack names (`0x1407C6338 + 24`) point at the skin
 //!   groups (Dark Mode) or back at Riku's own (Default Attire), each write checked against what is
 //!   there. Re:CoM reads them when it builds a player or loads its group: the next room or battle.
+//! - 0.198.30: with a hair that has a group for the battle's Dark Riku (the manifest's `dark_mode`), the entries of chars 5 / 6
+//!   (`0x1405A6910 + 20`, `0x1407C6338 + 40`) the same way (Re:CoM's Dark Mode: `0x140211960` preloads `[5 / 6]` for chars 3 / 4,
+//!   the factory `0x14020EC70` builds `CPlayerDRiku` on it, its rows bind in the pack named `[5 / 6]`; Checked (decomp)).
 
 use super::{log, va};
 use crate::riku_skin::{self as rs, Look, Skin};
@@ -18,6 +21,9 @@ use std::sync::OnceLock;
 static SKINS: OnceLock<Vec<Skin>> = OnceLock::new();
 /// 0.197.4: (Re:CoM's event pack group, its 109-bone copy) whose copy file the asset step wrote (`rs::event_packs`).
 static EVENT_PACKS: OnceLock<Vec<(u16, u16)>> = OnceLock::new();
+/// 0.198.32: (Re:CoM's pack the battle's Dark Riku plays, its 139-bone copy for KH2's hair) whose copy file the asset step wrote
+/// (`rs::dark_packs`).
+static DARK_PACKS: OnceLock<Vec<(u16, u16)>> = OnceLock::new();
 /// Riku's packs carry Sora's KH1 Guard (manifest + files), and his action tables name it.
 static GUARD: AtomicBool = AtomicBool::new(false);
 static GUARD_FILES: AtomicBool = AtomicBool::new(false);
@@ -36,6 +42,11 @@ static ON: AtomicU8 = AtomicU8::new(0);
 static MENU_ON: AtomicU8 = AtomicU8::new(0);
 /// Our motion pack names, per skin group (kept for the process: Re:CoM reads the pointers).
 static NAMES: OnceLock<Vec<(u16, usize)>> = OnceLock::new();
+/// 0.198.30: the look (`Look::bits`; 0.198.36: the hair and the blade) the Dark Mode entries (chars 5 / 6) point at now (0: Dark
+/// Riku's own groups).
+static DARK_ON: AtomicU8 = AtomicU8::new(0);
+/// Re:CoM's own name pointers of chars 5 / 6 ("PL0201" / "PL0211"), read before our first write there; None when they are not those.
+static DARK_NAMES: OnceLock<Option<[u64; 2]>> = OnceLock::new();
 
 fn look() -> Look {
     Look::from_bits(ON.load(Ordering::Relaxed))
@@ -50,8 +61,17 @@ pub unsafe fn chosen(s: &crate::settings::Settings) -> Look {
         dark: s.riku_costume == 1 && unlocked(),
         blade: (s.riku_heart_blade && blade_unlocked()) as u8,
         halloween: s.riku_costume == 2 && halloween_unlocked(),
-        hair: s.riku_hair.min(2),
+        hair: if hair_unlocked(s.riku_hair.min(2)) { s.riku_hair.min(2) } else { 0 },
     }
+}
+
+/// A hair is earned in this save (0.198.33, `crate::riku_unlocks::hair_unlocked`: BBS at Vexen's win, KH2 at Riku Replica I's),
+/// or the debug `all_unlock` (development builds only). Re:CoM's own hair always.
+///
+/// # Safety
+/// Reads Re:CoM's story variable (main thread).
+pub unsafe fn hair_unlocked(hair: u8) -> bool {
+    hair == 0 || super::settings().all_unlock || super::unlocks::riku_hall_bits().is_some_and(|b| crate::riku_unlocks::hair_unlocked(hair, b))
 }
 
 /// The save block's spare bit for "Riku reached Halloween Town" (0.178.0; Riku's own save: bits 1 /
@@ -132,7 +152,20 @@ pub fn preload(manifest: Option<&Path>) {
         log(&format!("riku skin: event pack copies for the KH2 hair {packs:?}"));
     }
     let _ = EVENT_PACKS.set(packs);
+    // 0.198.32: the battle Dark Riku's pack copies for KH2's hair; without all eleven his KH2 group is left out (`rs::dark_mode_usable`)
+    let dpacks: Vec<(u16, u16)> = rs::dark_packs(&text).into_iter().filter(|p| crate::keyblade_models::resource_path(p.1, "ANN").split('/').fold(dir.clone(), |d, x| d.join(x)).is_file()).collect();
+    if !dpacks.is_empty() {
+        log(&format!("riku skin: the battle Dark Riku's pack copies for the KH2 hair {dpacks:?}"));
+    }
+    let dm = rs::dark_mode(&text);
+    let usable = rs::dark_mode_usable(dm.clone(), &dpacks);
+    if usable.len() != dm.len() {
+        log(&format!("riku skin: only {} of the battle Dark Riku's {} pack copies on disk: his KH2 hair group is left out (Re:CoM's hair with it); run Build again", dpacks.len(), rs::DARK_PACK_SOURCES.len()));
+    }
+    let _ = DARK_PACKS.set(dpacks);
     let mut ok = Vec::new();
+    // 0.198.30: the battle Dark Riku's hair groups (`rs::dark_mode`), checked as the skins are
+    let skins: Vec<Skin> = skins.into_iter().chain(usable).collect();
     for s in skins {
         let missing: Vec<String> = rs::files(s.skin).into_iter().filter(|f| !f.split('/').fold(dir.clone(), |p, x| p.join(x)).is_file()).collect();
         if missing.is_empty() {
@@ -244,6 +277,18 @@ pub fn event_packs() -> &'static [(u16, u16)] {
     EVENT_PACKS.get().map_or(&[], |v| v.as_slice())
 }
 
+/// 0.198.32: the battle Dark Riku's pack copies (none before the manifest is read or without them).
+pub fn dark_packs() -> &'static [(u16, u16)] {
+    DARK_PACKS.get().map_or(&[], |v| v.as_slice())
+}
+
+/// 0.198.32: chars 5 / 6 point at the battle Dark Riku's KH2 hair groups (139 bones: his 128-bone packs need their copies).
+pub fn dark_kh2_hair() -> bool {
+    let sk = skins();
+    // 0.198.36: any blade (216 / 217 share the copies); the group the entries point at, not the hair asked (a fallback has none)
+    rs::dark_entries(&sk, Look::from_bits(DARK_ON.load(Ordering::Relaxed))).iter().any(|&g| sk.iter().any(|s| s.skin as u32 == g && s.hair == 1))
+}
+
 /// The look asks for the KH2 hair (109 bones, so Re:CoM's 102-bone event packs need their copies).
 pub unsafe fn kh2_hair_look() -> bool {
     let l = chosen(&super::settings());
@@ -261,14 +306,7 @@ pub fn rows_in() {
 
 /// The motion pack name pointers for chars 3 / 4 (Riku's or the skins').
 unsafe fn name_ptrs(b: usize, sk: &[Skin], look: Look) -> [u64; 2] {
-    let names = NAMES.get_or_init(|| {
-        sk.iter()
-            .map(|s| {
-                let c = std::ffi::CString::new(rs::ann_name(s.skin)).unwrap_or_default();
-                (s.skin, Box::leak(c.into_boxed_c_str()).as_ptr() as usize)
-            })
-            .collect()
-    });
+    let names = our_names(sk);
     let mut out = [0u64; 2];
     for (k, g) in rs::RIKU_GROUPS.iter().enumerate() {
         let recom = va(b, rs::RIKU_ANN_NAMES[k]) as u64;
@@ -280,6 +318,80 @@ unsafe fn name_ptrs(b: usize, sk: &[Skin], look: Look) -> [u64; 2] {
         };
     }
     out
+}
+
+/// Our pack names (made once, for every skin group of the manifest).
+fn our_names(sk: &[Skin]) -> &'static [(u16, usize)] {
+    NAMES.get_or_init(|| {
+        sk.iter()
+            .map(|s| {
+                let c = std::ffi::CString::new(rs::ann_name(s.skin)).unwrap_or_default();
+                (s.skin, Box::leak(c.into_boxed_c_str()).as_ptr() as usize)
+            })
+            .collect()
+    })
+}
+
+/// Re:CoM's name pointers of chars 5 / 6, read once (before our first write there) and checked to be "PL0201" / "PL0211".
+unsafe fn dark_recom_names(b: usize) -> Option<[u64; 2]> {
+    *DARK_NAMES.get_or_init(|| {
+        let at = va(b, rs::ANN_NAME_TABLE) + 8 * 5;
+        let p: [u64; 2] = [rd(at), rd(at + 8)];
+        let ok = p.iter().zip(rs::DARK_ANN_NAMES).all(|(&q, want)| q != 0 && std::slice::from_raw_parts(q as *const u8, 7) == want);
+        ok.then_some(p)
+    })
+}
+
+/// 0.198.30 (fork owner, 2026-11-27: "reparei que quando o personagem se transforma no DarkMode o cabelo é resetado para o Default"):
+/// chars 5 / 6 (the battle's Dark Riku) at the groups of `look`'s hair and blade ([`rs::dark_entries`]; 0.198.36 (fork owner,
+/// 2026-11-27: "no darkmode a keyblade tbm nn troca, já coloca essas regrs para o futuro"): the blade too), their pack names with them;
+/// each write checked against what we left there (Re:CoM's 201 / 211 and "PL0201" / "PL0211" the first time). Both or neither, as for
+/// Riku's.
+unsafe fn apply_dark(b: usize, sk: &[Skin], look: Look) {
+    let on = rs::dark_look(look);
+    let old = Look::from_bits(DARK_ON.load(Ordering::Relaxed));
+    let (now, want) = (rs::dark_entries(sk, old), rs::dark_entries(sk, on));
+    let missing = rs::dark_missing(sk, on);
+    if !missing.is_empty() && rs::dark_look(old) != on {
+        log(&format!(
+            "riku skin: no group of the battle's Dark Riku for hair {} with the {} (groups {missing:?}; run Build again): {}",
+            on.hair,
+            rs::BLADES[on.blade as usize % rs::BLADES.len()],
+            if on.blade != 0 { "the Keyblade kept on Re:CoM's hair where it has one, else his own look" } else { "his own look" }
+        ));
+    }
+    if now == want {
+        DARK_ON.store(on.bits(), Ordering::Relaxed);
+        return;
+    }
+    let Some(recom) = dark_recom_names(b) else {
+        log("riku skin: Re:CoM's motion pack names for Dark Riku are not PL0201 / PL0211 there; the battle's Dark Riku keeps his hair");
+        return;
+    };
+    let names = our_names(sk);
+    let ptrs = |e: [u32; 2]| -> Option<Vec<u8>> {
+        let mut v = Vec::new();
+        for (k, g) in e.iter().enumerate() {
+            let p = if *g == rs::DARK_GROUPS[k] as u32 { recom[k] } else { names.iter().find(|n| n.0 as u32 == *g)?.1 as u64 };
+            v.extend(p.to_le_bytes());
+        }
+        Some(v)
+    };
+    let (Some(n_now), Some(n_want)) = (ptrs(now), ptrs(want)) else { return };
+    let groups = |e: [u32; 2]| -> Vec<u8> { e.iter().flat_map(|x| x.to_le_bytes()).collect() };
+    let g_at = va(b, rs::GROUP_TABLE) + 4 * 5;
+    let n_at = va(b, rs::ANN_NAME_TABLE) + 8 * 5;
+    if !super::hook::patch(n_at, &n_now, &n_want, "char -> motion pack name (Dark Riku)") {
+        log("riku skin: Re:CoM's motion pack names for Dark Riku are not what we left there; the battle's Dark Riku keeps his hair");
+        return;
+    }
+    if !super::hook::patch(g_at, &groups(now), &groups(want), "char -> group table (Dark Riku)") {
+        super::hook::patch(n_at, &n_want, &n_now, "char -> motion pack name (Dark Riku, back)");
+        log("riku skin: Re:CoM's char -> group table is not 201 / 211 there; the battle's Dark Riku keeps his hair");
+        return;
+    }
+    DARK_ON.store(on.bits(), Ordering::Relaxed);
+    log(&format!("riku skin: the battle's Dark Riku (chars 5 / 6) -> groups {want:?}, motion packs {:?}; from the next battle", want.map(|g| rs::ann_name(g as u16))));
 }
 
 fn look_name(l: Look) -> String {
@@ -348,6 +460,10 @@ pub unsafe fn refresh(b: usize) {
         // Only the setting (no live change: the old player may be gone during a room build).
         let _ = super::store_item(crate::menu::Item::Costume, 0);
     }
+    if !hair_unlocked(s.riku_hair.min(2)) {
+        log(&format!("riku skin: the {} hair chosen, but this save hasn't earned it yet (BBS: Vexen's win; KH2: Riku Replica I's): Re:CoM's hair", if s.riku_hair == 1 { "KH2" } else { "BBS" }));
+        let _ = super::store_item(crate::menu::Item::Hair, 0);
+    }
     if s.riku_heart_blade && !blade_unlocked() {
         log("riku skin: the Keyblade of Heart chosen, but this save hasn't reached Dark Mode yet: the Soul Eater");
         let _ = super::store_item(crate::menu::Item::Blade, 0);
@@ -368,6 +484,7 @@ pub unsafe fn apply(b: usize, on: Look) {
         }
         return;
     }
+    apply_dark(b, &sk, on);
     let now = look();
     if now == on {
         return;

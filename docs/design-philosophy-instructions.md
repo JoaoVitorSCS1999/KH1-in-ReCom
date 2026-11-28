@@ -51,6 +51,76 @@ HUD, party, unlocks, shops, story events), in both stories:
    what Re:CoM would show at that point.
 5. **When unsure, ask** the owner before building (§ Known open design questions); do not guess the rule.
 
+### Riku's combat: KH1's system, fully adapted to Riku's own gameplay (2026-11-27)
+
+Fork owner, 2026-11-27, verbatim, on 0.198.22 in game: "as animações de combate do sistema do Riku estão meio estranhas
+ainda e mal adaptadas os danos a defesa está melhor mas ainda está problemática, alguns ataques parece que não pegam";
+then, told that Riku's own swing clips were played in KH1 Sora's order and timing: "então ela é tocada no ritmo do KH1 mas
+eu já falei que era para reproduzir o sistema do KH1 ENTRETANTO adaptando totalmente a jogabilidade do Riku! e
+respeitando as especialidades dele, e até o momento está pouco fluído".
+
+This refines 0.162.0's "fora as específicidades do Riku todas as regras de combate precisam ser iguais as do Sora":
+
+- **KH1's system stays**: the rules of the combat (lock-on, the combo counter and its limits, MP and its charge, the
+  Guard and its reactions, the post-hit invulnerability, no card duel, KH1 battles and enemies).
+- **Riku's moves are his own**: his swings, their order, their rhythm, their hit windows, their clip lengths and their
+  travel come from Re:CoM's Riku (and Dark Riku in Dark Mode), never from KH1 Sora's motions. KH1's numbers that only
+  describe Sora's animations (his hit frames, motion lengths, root travel) do not apply to Riku.
+- **His specialties are kept**: Dark Points and Dark Mode, his sleights, his weapon and his own reactions.
+- The goal is a fluid combo: a swing flows into the next as in Re:CoM, not cut by Sora's timing.
+
+### Riku's Guard: defending from the press, everything from in front (2026-11-27, final)
+
+Fork owner, 2026-11-27, verbatim, on 0.198.28 in game: "a defesa segue uma merda, eu aperto o X e ela não conta, assim que
+apertar o X em teoria ela tem que estar defendendo igual o KH1, preciso que vc pare de tanto retrabalho sobre esse ponto";
+on the proposal (live from the first frame, every hit from in front, not only the blade): "a defesa é a defesa e se movendo
+é esquiva parsa". Also: "veja se da para reaproveitar algo da gameplay com o Sora, aliás tome ela de base, mas novamente...
+adaptando de forma 100% com a gameplay do riku".
+
+- Riku's Guard is live from the press to the end of KH1's live window (frame 36 of 54), and blocks every hit from in front
+  (±100°), on the blade or not. Behind him it is not blocked; KH1's attack types / priorities that pass a guard still pass.
+- Square while moving at run speed or more is the roll (KH1's Dodge Roll rule); standing or walking, the Guard.
+- Sora's Guard stays KH1's (blade contact, frames 10..36).
+- This is settled: no further change to when or what Riku's Guard blocks without a new ask from the owner.
+- Sora's gameplay is the base for Riku's, adapted to Riku's own moves (§ Riku's combat).
+
+### Modularity is the base principle (2026-11-27)
+
+Fork owner, 2026-11-27, verbatim: "para os MEUS mods coloque a Modularidade como princípio BAZILAR as coisas precisam ser
+intercambiáveis e compatíveis umas com as outras!"; then "pra mim esse é o princípio mais importante da customização, sem modularidade não há customização, é IMPOSSÍVEL haver ser perda de eficiência" (also the workspace's
+`CLAUDE.md` rule 12, for all of the owner's mods). The most important principle of customization: an option that is not
+modular is not done.
+
+- Every option is a piece that works with every other: any mix the player can choose must work (Riku's hair × Keyblade ×
+  costume × Dark Mode; Sora's and Riku's settings; each KH1 / Re:CoM toggle with the others).
+- A change is done only when its combinations with the existing pieces work, or its Stage lists the combination that
+  doesn't, why, and what falls back.
+- Pieces are built apart (own module, own data, own toggle) and joined through one shared rule (e.g. one look table keyed by
+  costume, Keyblade and hair), never copied per case.
+
+### Cosmetics are earned: reward after effort (2026-11-27)
+
+Fork owner, 2026-11-27, verbatim: "modularidade e senso de rencompensa após esforço são os pontos mais importântes para diversão, então por isso as nossas features de costméticos precisam ser desbloqueádas a partir da narrativa ou de ações específicas nos jogos" (also the workspace's `CLAUDE.md` rule 13).
+
+- Every cosmetic (costumes, hair, the Keyblade look, any later one) unlocks through Riku's / Sora's story or a specific
+  action in game, kept in the save, never free from the start in a released DLL; `all_unlock` stays development-only.
+- Today: the Dark Mode costume and the Keyblade of Heart unlock at his first Dark Mode, the Halloween Town costume on
+  reaching Halloween Town; the hair choice (`riku_hair`: KH2 / BBS) has no unlock yet (to be chosen by the owner).
+- A new cosmetic is not done without its unlock, written in its Stage.
+
+### Riku's Dark Mode keeps every look the player chose (2026-11-27)
+
+Fork owner, 2026-11-27, verbatim, on 0.198.29-0.198.32 in game: "reparei que quando o personagem se transforma no DarkMode o
+cabelo é resetado para o Default"; then "no darkmode a keyblade tbm nn troca, já coloca essas regrs para o futuro... além
+disso percebi que o cabelo do bbs tem alguns espaços vazios no modo dark mode, testei pulando e atacando".
+
+- Every look chosen for Riku (hair, Keyblade, costume pieces, and any added later) carries into the battle's Dark Mode (Dark
+  Riku, Re:CoM's chars 5 / 6), as Dark Riku's own version of that look; the transformation never resets one to Re:CoM's.
+- A new look option for Riku is not done until it also works on Dark Riku (model, his own clips and packs, his sleights
+  and events), or the Stage says why not and what he shows instead.
+- Before a look change goes to the owner it is checked on Dark Riku too: renders of idle, walk, run, **jump**, swings and
+  the finisher, guard, a cast, a sleight (`model-change-validation`; jump and attacks are where gaps show).
+
 ### Riku's sleights: learned as in Re:CoM, and Re:CoM's Sleights List in his Customize (2026-11-27)
 
 Fork owner, 2026-11-27, verbatim, with three screenshots (Re:CoM's camp Sleights List at 0:02, every row `?????`;

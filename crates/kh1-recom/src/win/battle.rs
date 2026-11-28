@@ -593,7 +593,7 @@ pub unsafe extern "win64" fn manager_ctor(this: usize, a: usize, c: usize, d: us
     capped(&BATTLE_LINES, b::BATTLE_LOG_LINES, || {
         format!(
             "battle start (battle {battle}): {}; no-card attacks (P1) {}; think gate (P2) and grant all (P3): {}; crowd pace (P4): {}; Sora attacking for bosses (P5): {}",
-            if kh1 { "KH1 (Combat = KH1, Sora's story)" } else if mv::kh1_on() { "Re:CoM (Riku's story)" } else { "Re:CoM (Combat = Re:CoM)" },
+            if kh1 && super::stats::riku_story() { "KH1 (Combat = KH1, Riku's story)" } else if kh1 { "KH1 (Combat = KH1, Sora's story)" } else if mv::kh1_on() { "Re:CoM (Riku's story)" } else { "Re:CoM (Combat = Re:CoM)" },
             if kh1 { "on" } else { "off" },
             match switched {
                 Some(_) if want[0] => "ours",

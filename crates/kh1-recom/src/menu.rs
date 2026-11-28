@@ -164,6 +164,8 @@ const COSTUMES: &[&[u8]] = &[b"Default Attire\0", b"Dark Mode\0", b"Halloween To
 /// The help line when Dark Mode is asked for before Riku has reached it (0.156.0).
 pub const COSTUME_LOCKED: &[u8] = b"Riku must reach Dark Mode once to wear this attire.\0";
 pub const RIKU_HALLOWEEN_LOCKED: &[u8] = b"Riku must reach Halloween Town once to wear this attire.\0";
+pub const HAIR_KH2_LOCKED: &[u8] = b"Riku must defeat Riku Replica once to wear this hair.\0";
+pub const HAIR_BBS_LOCKED: &[u8] = b"Riku must defeat Vexen once to wear this hair.\0";
 const BLADES: &[&[u8]] = &[b"Soul Eater\0", b"Keyblade of Heart\0"];
 const HAIRS: &[&[u8]] = &[b"Re:CoM\0", b"KH2\0", b"BBS\0"];
 const SORA_COSTUMES: &[&[u8]] = &[b"Default Attire\0", b"Halloween Town\0"];
@@ -626,7 +628,7 @@ mod tests {
 
     #[test]
     fn texts_are_terminated_ascii_and_fit_the_help_box() {
-        let mut all: Vec<&[u8]> = Vec::new();
+        let mut all: Vec<&[u8]> = vec![COSTUME_LOCKED, RIKU_HALLOWEEN_LOCKED, BLADE_LOCKED, SORA_COSTUME_LOCKED, HAIR_KH2_LOCKED, HAIR_BBS_LOCKED];
         for p in Page::ALL {
             all.extend([p.label(), p.help()]);
             for it in p.items() {

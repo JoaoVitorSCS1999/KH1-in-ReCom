@@ -338,6 +338,12 @@ pub const MODEL_HOOKS: &[Site] = &[
     // (`0x14024D860(ctrl, id, slot, start, …)`: `0x1402A4820(id)` at ctrl +0x28, then `0x14024C760`); 0.197.4: Riku's event
     // pack copies (`win::models::pack_pick`). Checked (exe; the workspace's `knowledge/ReCoM/recom-skeleton-limits.md`).
     Site { name: "motion pack pick (0x14024D860)", rva: 0x0024_D860, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x30] },
+    // mov [rsp+8],rbx; mov [rsp+0x10],rsi; push rdi; sub rsp,0x20 (15 bytes; next `mov rbx,rcx`): the same pick without a blend
+    // (`0x14024ED00(ctrl, id, slot, start)`: `0x1402A4820(id)` at ctrl +0x28, then `0x14024D320`), taken by `0x1401A3580` when the blend
+    // is < 0 (the sleight path `0x1401F73A0` / `0x1401F7290` with -1); 0.198.32: the battle Dark Riku's pack copies
+    // (`win::models::pack_set`). Checked (exe: its only reference is the call at `0x1401A35F5`; no branch or pointer lands in the moved
+    // bytes (scan of rel32 calls / jumps, jcc, rel8 jumps, 8-byte pointers)).
+    Site { name: "motion pack pick, no blend (0x14024ED00)", rva: 0x0024_ED00, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20] },
 ];
 
 /// Re:CoM functions the model code calls (or reaches through a vtable it checks).

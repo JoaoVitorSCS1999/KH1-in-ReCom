@@ -49,19 +49,19 @@ pub const BLEED_BELOW: u8 = 72;
 pub const SOFTEN_KNEE: f64 = 110.0;
 /// The part of a dark texel's distance under [`SOFTEN_KNEE`] that [`soften`] keeps (0.5: 40 becomes 75, 80 becomes 95).
 pub const SOFTEN_KEEP: f64 = 0.5;
-/// See [`HairSource::painted_temple_window`]: |x| 6-11 cm, y -1 to 9 cm, z -2 to 6 cm from Re:CoM's `head`.
+/// Re:CoM's painted temple lock (the `head` triangles whose texels are the lock, 3-4 a side, centroids 7.8-9.2 cm out): |x| 6-11 cm,
+/// y -1 to 9 cm, z -2 to 6 cm from Re:CoM's `head` (0.198.13's unpaint window; the test `sideburn_probe` measures the lock there).
 pub const TEMPLE_WINDOW: [f64; 6] = [0.06, 0.11, -0.01, 0.09, -0.02, 0.06];
-/// 0.198.13 (fork owner: "não atravessar nem mesmo deixar muita folga.. e também deixar natural!"): the kid's sideburn, in front of
-/// each ear, is the hair's vertices in this window (head-relative after the fit, metres: least |x|, y range, z range; two a side, its
-/// root and its tip, Checked (files, test `sideburn_probe`)). With the painted lock gone from Re:CoM's temple its tip stood 6.5 / 7.5 mm
-/// (-x / +x) off the cheek, the root 2.6 / 3.8 mm.
+/// The kid's sideburn, in front of each ear: the hair's vertices in this window (head-relative after the fit, metres: least |x|, y
+/// range, z range) are its root and its tip (two a side, Checked (files, test `sideburn_probe`): +x tip (77, -7, 31) mm, root (89, 27,
+/// 16) mm; the same mirrored). The strand is the kid's islands 7 (front) and 17 (back): from the root and the tip up to four corners in
+/// the hair 4.5-7.7 cm over the head bone.
+/// 0.198.36 (fork owner on 0.198.34/35, a screenshot with an arrow at the pointed lock at Riku's right temple: "cabelo ta quase
+/// perfeito do bbs essa costeleta ainda ta estranha, parece do wolverine, não acho que vc precisava ter tirado a costeleta pinta da
+/// cabeça base"): every hair triangle with a corner in this window is left out (6 a side, see [`HairSource::hair`] here), and
+/// Re:CoM's painted lock stays on the face as Re:CoM paints it (0.198.13 to 0.198.35 covered it and kept this strand, laid 3.5 mm
+/// off the cheek).
 pub const SIDEBURN: [f64; 5] = [0.06, -0.06, 0.03, -0.02, 0.06];
-/// The sideburn's vertices farther than this from the face (signed distance to the plane of the face triangle nearest them) are moved
-/// in to it: it lies on the cheek without touching it. 3.5 mm, not 2 (model-reviewer of the temple fix): the sideburn's long triangles
-/// are flat over the convex cheek, and with the tip pulled to 2 mm the one from the tip up to the root dipped 0.4-0.5 mm under the
-/// temple's skin (-x, 1.4-2.2 cm above the head bone), a skin fleck in the hair; at 2.5 / 3.0 mm it still dipped 0.3 / 0.1 mm, at
-/// 3.5 mm none on either side (`sideburn_probe`, "skin over the hair"; the fit's tip was 6.5 / 7.5 mm off).
-pub const SIDEBURN_REST: f64 = 0.0035;
 /// Corners this far under `atama` (model units) or higher are the head region.
 pub const HEAD_MARGIN: f64 = 0.03;
 /// The lining under the back of the hair (0.194.2): how far each vertex is pulled toward the head's centre (fraction).
@@ -79,8 +79,6 @@ pub struct BbsHairSource {
     pub sway: Option<[crate::pam::PamClip; 3]>,
     /// The sway's rig, made by [`HairSource::prepare_mdl`] from Re:CoM's model: per kid hair bone, the Re:CoM bone that carries it.
     rig: std::cell::RefCell<Option<SwayRig>>,
-    /// Re:CoM's face as it stays (world rest triangles, [`HairSource::set_face`]), for [`SIDEBURN_REST`].
-    face: std::cell::RefCell<Vec<[[f64; 3]; 3]>>,
 }
 
 /// The hair's sway (0.197.3, item 6 of Stage 391; the workspace's `knowledge/BBS/bbs-kid-riku-hair-motion.md`, Checked (files)): in
@@ -133,7 +131,7 @@ impl BbsHairSource {
                     (Some(a), Some(b), Some(c)) => Some([a, b, c]),
                     _ => None,
                 };
-                return Ok(BbsHairSource { pmo, dds, sway, rig: Default::default(), face: Default::default() });
+                return Ok(BbsHairSource { pmo, dds, sway, rig: Default::default() });
             }
         }
         bad(format!("BBS: {MODEL} in none of the bbs archives"))
@@ -484,40 +482,19 @@ pub fn plane_dist(face: &[[[f64; 3]; 3]], p: [f64; 3], centre: [f64; 3]) -> Opti
     Some(((0..3).map(|k| n[k] * (p[k] - f[0][k])).sum::<f64>(), n))
 }
 
-impl HairSource for BbsHairSource {
-    fn set_face(&self, face: &[[[f64; 3]; 3]]) {
-        *self.face.borrow_mut() = face.to_vec();
-    }
-
-    /// 0.198.13: the temples' painted lock (fork owner: "tem a do cabelo mesmo e tem a da cabeça base ao lado, ficou estranho"): three
-    /// head triangles a side, centroids 7.8-9.2 cm out, 1.5-6.8 cm over the head bone, 0.5 cm behind it to 4 cm in front, Checked (files,
-    /// test `sideburn_probe`: the same on `PL0101` and `PL0201`). The kid's own sideburn is the one that stays.
-    fn painted_temple_window(&self) -> Option<[f64; 6]> {
-        // tests only: `NO_UNPAINT` set renders the "before"
-        if cfg!(test) && std::env::var("NO_UNPAINT").is_ok() {
-            return None;
-        }
-        Some(TEMPLE_WINDOW)
-    }
-    fn prepare_mdl(&self, mdl: &[u8]) -> Result<Vec<u8>> {
-        let rig = self.sway_rig(mdl)?;
-        let mut out = mdl.to_vec();
-        if let Some(rig) = &rig {
-            crate::kh2_hair_rig::patch_rest(&mut out, &rig.pairs.iter().map(|x| (x.1, x.2)).collect::<Vec<_>>())?;
-        }
-        *self.rig.borrow_mut() = rig;
-        Ok(out)
-    }
-
-    fn bake_ann(&self, ann: &[u8], _mdl: &[u8]) -> Result<Option<Vec<u8>>> {
-        use crate::kh2_hair_rig::{CLIP_MAP, KH2_RUN, KH2_WALK};
+impl BbsHairSource {
+    /// [`HairSource::bake_ann`] on any pack's slots: `map` = (slot, KH2 role) as [`crate::kh2_hair_rig::CLIP_MAP`] (Riku's
+    /// `PL0101.ANN`); 0.198.33: the battle's Dark Riku's own slots ([`crate::riku_skin::dark_slots`]), so his battle stance (slot 21)
+    /// sways as the idle, not as the run Riku's slot 21 is. Uses the rig of the model last given to [`HairSource::prepare_mdl`].
+    pub fn bake_ann_slots(&self, ann: &[u8], map: &[(usize, usize)]) -> Result<Option<Vec<u8>>> {
+        use crate::kh2_hair_rig::{KH2_RUN, KH2_WALK};
         let rig = self.rig.borrow();
         let (Some(rig), Some(clips)) = (rig.as_ref(), self.sway.as_ref()) else { return Ok(None) };
         let mut a = crate::ann::Ann::parse(ann)?;
         for (slot, s) in a.slots.iter_mut().enumerate() {
             let Some(c) = s.clip.as_mut() else { continue };
             // the clip's role as the KH2 hair reads it (Assumption there): walk, run, else the kid's idle
-            let src = match CLIP_MAP.iter().find(|x| x.0 == slot).map(|x| x.1) {
+            let src = match map.iter().find(|x| x.0 == slot).map(|x| x.1) {
                 Some(KH2_WALK) => &clips[1],
                 Some(KH2_RUN) => &clips[2],
                 _ => &clips[0],
@@ -551,6 +528,24 @@ impl HairSource for BbsHairSource {
         }
         Ok(Some(a.to_bytes()))
     }
+}
+
+impl HairSource for BbsHairSource {
+    // (no `painted_temple_window`: 0.198.13 to 0.198.35 covered Re:CoM's painted temple lock, [`TEMPLE_WINDOW`] (fork owner then: "tem a
+    // do cabelo mesmo e tem a da cabeça base ao lado, ficou estranho"); since 0.198.36 the painted lock is the one that stays, [`SIDEBURN`])
+    fn prepare_mdl(&self, mdl: &[u8]) -> Result<Vec<u8>> {
+        let rig = self.sway_rig(mdl)?;
+        let mut out = mdl.to_vec();
+        if let Some(rig) = &rig {
+            crate::kh2_hair_rig::patch_rest(&mut out, &rig.pairs.iter().map(|x| (x.1, x.2)).collect::<Vec<_>>())?;
+        }
+        *self.rig.borrow_mut() = rig;
+        Ok(out)
+    }
+
+    fn bake_ann(&self, ann: &[u8], _mdl: &[u8]) -> Result<Option<Vec<u8>>> {
+        self.bake_ann_slots(ann, &crate::kh2_hair_rig::CLIP_MAP)
+    }
 
     fn hair(&self, names: &[String], world: &[Aff]) -> Result<SrcHair> {
         let pmo = parse_pmo(&self.pmo)?;
@@ -560,22 +555,10 @@ impl HairSource for BbsHairSource {
         let img = decode_dds(&self.dds)?;
         let head = names.iter().position(|n| n == HEAD_BONE).ok_or_else(|| Error::Format("hair: no head bone".into()))?;
         let (a, h) = (kw[atama].t, world[head].t);
-        // 0.198.13: the sideburn laid on the cheek ([`SIDEBURN`], [`SIDEBURN_REST`])
-        let face = self.face.borrow();
-        let centre = [h[0] + crate::ddd_hair::HEAD_CENTRE[0], h[1] + crate::ddd_hair::HEAD_CENTRE[1], h[2] + crate::ddd_hair::HEAD_CENTRE[2]];
-        let frame = |p: [f64; 3]| {
-            let q = [0, 1, 2].map(|k| h[k] + SCALE[k] * (p[k] - a[k]) + SHIFT[k]);
-            let r = [q[0] - h[0], q[1] - h[1], q[2] - h[2]];
-            // tests only: `NO_UNPAINT` set renders the "before" (no sideburn move either)
-            if (cfg!(test) && (std::env::var("NO_UNPAINT").is_ok() || std::env::var("NO_SB_MOVE").is_ok())) || r[0].abs() < SIDEBURN[0] || !(SIDEBURN[1]..=SIDEBURN[2]).contains(&r[1]) || !(SIDEBURN[3]..=SIDEBURN[4]).contains(&r[2]) {
-                return q;
-            }
-            match plane_dist(&face, q, centre) {
-                Some((d, n)) if d > SIDEBURN_REST => [0, 1, 2].map(|k| q[k] - n[k] * (d - SIDEBURN_REST)),
-                _ => q,
-            }
-        };
+        let frame = |p: [f64; 3]| [0, 1, 2].map(|k| h[k] + SCALE[k] * (p[k] - a[k]) + SHIFT[k]);
         let (hair, _) = classify(&pmo, a[1], &img);
+        // 0.198.36: the kid's sideburn strand left out, Re:CoM's painted lock shows in its place ([`SIDEBURN`])
+        let hair = without_sideburn(&pmo, hair, a);
         // 0.194.1: every corner on `head` (rigid). Re:CoM's hair bones are keyed for its long hair (idle: `l_hair4` / `r_hair4` 18 to
         // 19 deg off rest against the head; run: `b_hair2` 69 deg); on the kid's short closed shell they split the layers (side tufts
         // off the face, the nape's under-layer spread sideways, seen in game on 0.194.0).
@@ -623,6 +606,22 @@ impl HairSource for BbsHairSource {
         // 0.198.12: the shards' dark roots lifted ([`soften`]).
         Ok(SrcHair { tris, islands: n, skin: 0, atlas: soften(&bleed(&img, BLEED)), one_sided: true })
     }
+}
+
+/// 0.198.36 ([`SIDEBURN`]): the hair triangles (as [`classify`] gives them) without the kid's sideburn strand: every triangle of a UV island
+/// that has a corner in the [`SIDEBURN`] window after the fit (`a` = `atama`'s rest position; the window is head-relative, so the fit's
+/// scale and shift about `atama` are all it needs). The whole island, not only the triangles with a corner there: the strand's top
+/// triangle (4.5-7.7 cm over the head bone) has none and lay across the temple's skin (1.9 mm out to 0.2 mm in, test `sideburn_probe`).
+pub fn without_sideburn(pmo: &Pmo, hair: Vec<(usize, usize)>, a: [f64; 3]) -> Vec<(usize, usize)> {
+    let in_window = |p: [f64; 3]| {
+        let r = [0, 1, 2].map(|k| SCALE[k] * (p[k] - a[k]) + SHIFT[k]);
+        r[0].abs() >= SIDEBURN[0] && (SIDEBURN[1]..=SIDEBURN[2]).contains(&r[1]) && (SIDEBURN[3]..=SIDEBURN[4]).contains(&r[2])
+    };
+    let q = |x: f64| (x * 4096.0).round() as i32;
+    let corners: Vec<[(i32, i32); 3]> = hair.iter().map(|&(mi, ti)| pmo.meshes[mi].tris[ti].map(|i| (q(pmo.meshes[mi].verts[i].uv[0]), q(pmo.meshes[mi].verts[i].uv[1])))).collect();
+    let (isl, _) = crate::ddd_hair::islands(&corners);
+    let strand: std::collections::HashSet<usize> = hair.iter().zip(&isl).filter(|(&(mi, ti), _)| pmo.meshes[mi].tris[ti].iter().any(|&i| in_window(pmo.meshes[mi].verts[i].pos))).map(|(_, &k)| k).collect();
+    hair.into_iter().zip(isl).filter(|(_, k)| !strand.contains(k)).map(|(t, _)| t).collect()
 }
 
 /// The hair's texels ([`is_hair_texel`]) darker than [`SOFTEN_KNEE`] moved toward it, keeping [`SOFTEN_KEEP`] of the distance; the
@@ -826,6 +825,10 @@ mod tests {
         let (rtm, hd) = kh1_formats::egs::decode_entry_full(&keys, &arc.read_raw_entry(e).unwrap()).unwrap();
         let swap = with_hair(&mdl, &rtm, &hd, &TARGET, &src).unwrap();
         eprintln!("{:?}", swap.report);
+        // 0.198.36: without the kid's sideburn strand (islands 7 and 17: 4 + 3 triangles a side)
+        let n_all = hair.len();
+        let hair = without_sideburn(&pmo, hair, sk.rest_world()[atama].t);
+        assert_eq!(n_all - hair.len(), 14, "the sideburn strand");
         let sk_n = lining_count(&pmo, &hair, sk.rest_world()[atama].t);
         eprintln!("lining: {sk_n} triangles");
         assert_eq!(swap.report.ddd_hair, hair.len() + sk_n);
@@ -955,10 +958,12 @@ mod tests {
         }
     }
 
-    /// 0.198.13 (fork owner: "tem a do cabelo mesmo e tem a da cabeça base ao lado, ficou estranho"): on Dark Riku's and Riku's models
-    /// with the BBS hair, the temples' painted lock is covered (triangles moved, texels filled) and the kid's sideburn lies 0.5-3 mm off
-    /// the cheek on both sides (rest; it is on `head`, as the face, so every frame); prints the kept head triangles that still show grey
-    /// texels and the kid's own sideburn in BBS (`SB_VERTS`: per vertex).
+    /// 0.198.13 (fork owner: "tem a do cabelo mesmo e tem a da cabeça base ao lado, ficou estranho"), 0.198.36 (fork owner: "essa
+    /// costeleta ainda ta estranha, parece do wolverine, não acho que vc precisava ter tirado a costeleta pinta da cabeça base"): on Dark
+    /// Riku's and Riku's models with the BBS hair, both sides, Re:CoM's painted lock is kept (nothing moved), no corner of the kid's
+    /// sideburn strand is left, the painted lock shows from the side, and no strip of skin wider than 1 mm lies between the hair's lower
+    /// edge and the lock's top (rest; hair and face are on `head`, so every frame; `SB_MAP` prints the side view's cells). Prints the
+    /// kid's own sideburn in BBS and the kept head triangles that show grey texels.
     #[test]
     fn sideburn_probe() {
         let Ok(g) = std::env::var("RECOM_GAME") else { return };
@@ -1044,9 +1049,8 @@ mod tests {
                 let uvs: Vec<[[f64; 2]; 3]> = dt::collect(&p3n).into_iter().filter(|t| t.tex == ht && t.v.iter().all(|v| v.bone() == hb)).map(|t| t.v.map(|v| v.uv().map_or([0.0; 2], |u| [u[0] as f64, u[1] as f64]))).filter(|uv| uv.iter().all(|p| p[1] > 0.7)).collect();
                 pics.push((target.new_texture.to_string(), decode_dds(&swap.dds).unwrap(), uvs));
             }
-            assert!(swap.report.temple_unpainted.0 >= 8 && swap.report.temple_unpainted.1 > 1000, "{grp}: the painted lock is covered");
-            // the BBS sideburn's clearance to the face: each hair vertex in front of the ear, signed distance (+ out) to the nearest face
-            // triangle's plane (face = kept head triangles on the atlas)
+            // 0.198.36: the painted lock is Re:CoM's again (nothing moved) and the kid's strand is gone
+            assert_eq!(swap.report.temple_unpainted, (0, 0), "{grp}: the painted lock is kept");
             {
                 let rsk = RecomSkeleton::parse(&swap.mdl).unwrap();
                 let rw = rsk.rest_world();
@@ -1054,62 +1058,49 @@ mod tests {
                 let h0 = rw[hb].t;
                 let p3o = crate::mdl::MdlPart::parse_bytes(&crate::mdl::split_parts(&swap.mdl).unwrap()[3]).unwrap();
                 let hair_tex = p3o.texture_names().iter().position(|n| n == target.new_texture).unwrap() as u32;
+                let atlas_tex = p3o.texture_names().iter().position(|n| n == target.texture).unwrap() as u32;
+                let atlas = decode_dds(&swap.atlas_dds).unwrap();
                 let all = dt::collect(&p3o);
-                // (the temples' triangles moved onto the hair's texture, 0.198.13, are face too: they share their corners with the face's)
-                let face_pts: std::collections::HashSet<[i64; 3]> = all.iter().filter(|t| t.tex != hair_tex && t.v.iter().all(|v| v.bone() == hb)).flat_map(|t| t.v.map(|v| rw[v.bone()].point(v.pos().map(|x| x as f64)).map(|x| (x * 1e4).round() as i64))).collect();
-                let is_face = |t: &crate::ddd_hair::RTri| t.tex != hair_tex || t.v.iter().all(|v| face_pts.contains(&rw[v.bone()].point(v.pos().map(|x| x as f64)).map(|x| (x * 1e4).round() as i64)));
-                let face: Vec<[[f64; 3]; 3]> = all.iter().filter(|t| is_face(t) && t.v.iter().all(|v| v.bone() == hb)).map(|t| t.v.map(|v| rw[v.bone()].point(v.pos().map(|x| x as f64)))).collect();
-                let centre = [h0[0], h0[1] + 0.07, h0[2] + 0.04];
+                let wp = |v: &crate::mdl::MeshVertex| rw[v.bone()].point(v.pos().map(|x| x as f64));
+                let hair_tris: Vec<[[f64; 3]; 3]> = all.iter().filter(|t| t.tex == hair_tex).map(|t| t.v.map(|v| wp(&v))).collect();
+                let face: Vec<([[f64; 3]; 3], [[f64; 2]; 3])> = all.iter().filter(|t| t.tex == atlas_tex && t.v.iter().all(|v| v.bone() == hb)).map(|t| (t.v.map(|v| wp(&v)), t.v.map(|v| v.uv().map_or([0.0; 2], |u| [u[0] as f64, u[1] as f64])))).collect();
+                let grey = |px: [u8; 4]| { let (mx, mn) = (px[0].max(px[1]).max(px[2]) as f64, px[0].min(px[1]).min(px[2]) as f64); mx > 40.0 && (mx - mn) / mx < 0.3 };
                 for side in [1.0f64, -1.0] {
-                    let (mut lo, mut hi) = (f64::MAX, f64::MIN);
-                    for t in all.iter().filter(|t| !is_face(t)) {
-                        for v in &t.v {
-                            let p = rw[v.bone()].point(v.pos().map(|x| x as f64));
-                            let r = [p[0] - h0[0], p[1] - h0[1], p[2] - h0[2]];
-                            if r[0] * side < SIDEBURN[0] || !(SIDEBURN[1]..=SIDEBURN[2]).contains(&r[1]) || !(SIDEBURN[3]..=SIDEBURN[4]).contains(&r[2]) { continue; }
-                            let d = plane_dist(&face, p, centre).map_or(f64::NAN, |x| x.0);
-                            if std::env::var("SB_VERTS").is_ok() { eprintln!("SBV {grp} {side} r ({:+.3},{:+.3},{:+.3}) d {:.1} bone {}", r[0], r[1], r[2], d * 1e3, rsk.bones[v.bone()].name); }
-                            lo = lo.min(d);
-                            hi = hi.max(d);
+                    // no hair corner left where the kid's strand was
+                    let n_in = hair_tris.iter().flatten().filter(|p| { let r = [p[0] - h0[0], p[1] - h0[1], p[2] - h0[2]]; r[0] * side >= SIDEBURN[0] && (SIDEBURN[1]..=SIDEBURN[2]).contains(&r[1]) && (SIDEBURN[3]..=SIDEBURN[4]).contains(&r[2]) }).count();
+                    // the temple seen from that side (rays along -x per side, 1 mm grid over the painted lock's window): per cell the
+                    // outermost face hit's texel (L = the painted lock, S = skin) unless a hair triangle is outside it (H)
+                    let w = TEMPLE_WINDOW;
+                    let (mut lock_seen, mut lock_hidden, mut widest, mut cols) = (0usize, 0usize, 0usize, 0usize);
+                    let mut map = String::new();
+                    for zi in ((w[4] * 1e3) as i32..=(w[5] * 1e3) as i32).rev() {
+                        let mut col = vec![];
+                        for yi in ((w[2] * 1e3) as i32..=(w[3] * 1e3) as i32).rev() {
+                            let o = [h0[0] + side * 0.2, h0[1] + yi as f64 * 1e-3, h0[2] + zi as f64 * 1e-3];
+                            let d = [-side, 0.0, 0.0];
+                            let fh = face.iter().filter_map(|(t, uv)| ray_bary(o, d, t).map(|(tt, b)| (tt, uv, b))).min_by(|a, b| a.0.total_cmp(&b.0));
+                            let Some((tf, uv, b)) = fh else { col.push(' '); continue };
+                            if 0.2 - tf < w[0] { col.push(' '); continue; }
+                            let hh = hair_tris.iter().filter_map(|t| ray_tri(o, d, t)).fold(f64::MAX, f64::min);
+                            let u = [b[0] * uv[0][0] + b[1] * uv[1][0] + b[2] * uv[2][0], b[0] * uv[0][1] + b[1] * uv[1][1] + b[2] * uv[2][1]];
+                            let lock = grey(texel(&atlas, u));
+                            col.push(if hh < tf { if lock { lock_hidden += 1; } 'H' } else if lock { lock_seen += 1; 'L' } else { 'S' });
                         }
-                    }
-                    eprintln!("SB {grp} sideburn x{} clearance mm: deepest {:.1} widest {:.1}", if side > 0.0 { "+" } else { "-" }, lo * 1e3, hi * 1e3);
-                    // the temple's skin through the hair (model-reviewer of the temple fix: a long hair triangle from the sideburn's root up
-                    // into the hair, its root pulled in, dipped under the temple 5-6 cm up and the skin showed in the hair): points of the face
-                    // triangles in the temple window, on the line out from the head's axis at their height; the outermost hair met there within 15 mm
-                    // nearer the axis than the point = skin over the hair (mm, deepest)
-                    let mut poke = 0.0f64;
-                    let mut npoke = 0usize;
-                    let hair_tris: Vec<[[f64; 3]; 3]> = all.iter().filter(|t| !is_face(t)).map(|t| t.v.map(|v| rw[v.bone()].point(v.pos().map(|x| x as f64)))).collect();
-                    for t in all.iter().filter(|t| is_face(t) && t.v.iter().all(|v| v.bone() == hb)) {
-                        let q = t.v.map(|v| rw[v.bone()].point(v.pos().map(|x| x as f64)));
-                        let c = [0, 1, 2].map(|k| (q[0][k] + q[1][k] + q[2][k]) / 3.0 - h0[k]);
-                        let w = TEMPLE_WINDOW;
-                        if c[0] * side < w[0] || c[0] * side > w[1] || !(w[2]..=w[3]).contains(&c[1]) || !(w[4]..=w[5]).contains(&c[2]) { continue; }
-                        for i in 0..=10 { for j in 0..=(10 - i) {
-                            let (l0, l1) = (i as f64 / 10.0, j as f64 / 10.0);
-                            let p = [0, 1, 2].map(|k| l0 * q[0][k] + l1 * q[1][k] + (1.0 - l0 - l1) * q[2][k]);
-                            let o = [h0[0], p[1], h0[2] + 0.02];
-                            let d = [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
-                            let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-                            let d = d.map(|x| x / len);
-                            // the outermost hair on that line (inner layers do not count)
-                            let outer = hair_tris.iter().filter_map(|ht| ray_tri(o, d, ht)).filter(|&tt| tt > len - 0.015 && tt < len + 0.03).fold(f64::MIN, f64::max);
-                            let gap = outer - len;
-                            if gap < 0.0 && gap > -0.015 {
-                                poke = poke.min(gap);
-                                npoke += 1;
-                                if std::env::var("SB_VERTS").is_ok() {
-                                    let ht = hair_tris.iter().find(|ht| ray_tri(o, d, ht) == Some(outer)).unwrap();
-                                    eprintln!("POKE {grp} {side} at {:?} gap {:.1} hair corners {:?}", [0, 1, 2].map(|k| ((p[k] - h0[k]) * 1e3).round()), gap * 1e3, ht.map(|c| [0, 1, 2].map(|k| ((c[k] - h0[k]) * 1e3).round())));
-                                }
+                        // the gap: skin cells between the hair's lower edge and the top of the painted lock in this column
+                        if let (Some(hl), Some(lt)) = (col.iter().rposition(|&c| c == 'H').and_then(|_| col.iter().position(|&c| c == 'H')), col.iter().position(|&c| c == 'L')) {
+                            let hair_end = (hl..col.len()).take_while(|&k| col[k] == 'H').last().unwrap_or(hl);
+                            if lt > hair_end {
+                                widest = widest.max(col[hair_end + 1..lt].iter().filter(|&&c| c == 'S').count());
                             }
-                        } }
+                            cols += 1;
+                        }
+                        map.push_str(&format!("{:+04} {}\n", zi, col.iter().collect::<String>()));
                     }
-                    eprintln!("SB {grp} temple x{} skin over the hair: deepest {:.1} mm, {npoke} samples", if side > 0.0 { "+" } else { "-" }, poke * 1e3);
-                    assert!(npoke == 0 || std::env::var("NO_SB_MOVE").is_ok() || std::env::var("SB_MEASURE").is_ok(), "{grp} x{side}: the temple's skin shows through the hair ({:.1} mm)", poke * 1e3);
-                    // the owner's two limits: not through the cheek, not far off it
-                    assert!(std::env::var("NO_SB_MOVE").is_ok() || std::env::var("SB_MEASURE").is_ok() || (lo > 0.0005 && hi <= SIDEBURN_REST + 1e-4), "{grp} x{side}: sideburn {:.1}..{:.1} mm off the cheek", lo * 1e3, hi * 1e3);
+                    if std::env::var("SB_MAP").is_ok() { eprintln!("SB {grp} x{} map (rows z mm front to back, columns y top to bottom):\n{map}", if side > 0.0 { "+" } else { "-" }); }
+                    eprintln!("SB {grp} x{}: strand corners {n_in}, painted lock cells seen {lock_seen} hidden {lock_hidden}, columns {cols}, widest skin gap under the hair {widest} mm", if side > 0.0 { "+" } else { "-" });
+                    assert_eq!(n_in, 0, "{grp} x{side}: the kid's sideburn is left");
+                    assert!(lock_seen >= 40, "{grp} x{side}: the painted lock shows ({lock_seen} cells)");
+                    assert!(cols > 0 && widest <= 1, "{grp} x{side}: the painted lock meets the hair (skin gap {widest} mm)");
                 }
             }
             let sk = RecomSkeleton::parse(&swap.mdl).unwrap();
@@ -1259,6 +1250,67 @@ mod tests {
             }
             swap.dds = own;
         }
+    }
+
+    /// 0.198.36 renders (fork owner's screenshot: Riku facing the camera, the lock at his right temple): the head framed as in game, Riku's
+    /// default attire's BBS mesh (`183`'s: `PL0101` with the hair) and the Dark Form's (`185`'s: the skin 121 with the hair), playing
+    /// Riku's idle (slot 1), walk (2), run (3), jump (4) and first swing (44), from the front, ±25, ±40, ±60 deg and both sides, and the idle
+    /// with the camera low and high; `out/temple_owner/<CAM_TAG>/<group>_s<slot>_y<yaw>_p<pitch>.png`.
+    #[test]
+    fn temple_owner_views() {
+        let Ok(g) = std::env::var("RECOM_GAME") else { return };
+        let g = std::path::PathBuf::from(g);
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let src = BbsHairSource::read(&g, &keys).unwrap();
+        let tag = std::env::var("CAM_TAG").unwrap_or_else(|_| "cam".into());
+        let out = dt::out_dir().join("temple_owner").join(&tag);
+        std::fs::create_dir_all(&out).unwrap();
+        let skin = crate::riku_skin::build_with(&arc, &keys, 101, 201, 121, None).unwrap();
+        let get = |grp: u16, ext: &str| skin.files.iter().find(|f| f.0 == crate::riku_skin::path(grp, ext)).map(|f| f.1.clone()).unwrap_or_else(|| install::read_recom(&arc, &keys, &crate::riku_skin::path(grp, ext)).unwrap());
+        for (name, base, raw, target) in [("183", 101u16, 101u16, TARGET), ("185", 121, 201, crate::ddd_hair::RIKU_0201_BBS)] {
+            let (mdl, ann0) = (get(base, "MDL"), get(base, "ANN"));
+            let e = arc.find(&crate::riku_skin::path(raw, "RTM")).unwrap();
+            let (rtm, hd) = kh1_formats::egs::decode_entry_full(&keys, &arc.read_raw_entry(e).unwrap()).unwrap();
+            let swap = with_hair(&src.prepare_mdl(&mdl).unwrap(), &rtm, &hd, &target, &src).unwrap();
+            let ann = crate::ann::Ann::parse(&src.bake_ann(&ann0, &mdl).unwrap().unwrap_or(ann0.clone())).unwrap();
+            let (p3, img, body) = crate::kh2_hair::tests::view_at(&swap, target.texture);
+            let sk = RecomSkeleton::parse(&swap.mdl).unwrap();
+            let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();
+            let head = sk.find("head").unwrap();
+            for slot in [1usize, 2, 3, 4, 44] {
+                let Some(c) = ann.slots.get(slot).and_then(|s| s.clip.as_ref()) else { continue };
+                let f = if slot == 1 { 25.0 } else { (c.frames / 2) as f64 };
+                let w = crate::kh2_hair::tests::posed_world(&sk, c, f);
+                let focus = w[head].point([0.0, 0.05, 0.01]);
+                let mut views: Vec<(f64, f64)> = [0.0, 25.0, -25.0, 40.0, -40.0, 60.0, -60.0, 90.0, 270.0].iter().map(|&y| (y, 0.0)).collect();
+                if slot == 1 {
+                    views.extend([(25.0, -30.0), (-25.0, -30.0), (25.0, 30.0), (-25.0, 30.0)]);
+                }
+                for (yaw, pitch) in views {
+                    crate::kh2_hair::tests::render_focus(&p3, &w, &names, &img, &body, yaw, pitch, (focus, 0.15), &out.join(format!("{name}_s{slot}_y{yaw}_p{pitch}.png")));
+                }
+            }
+        }
+    }
+    /// [`ray_tri`] with the hit's barycentric weights of `t`'s corners.
+    fn ray_bary(o: [f64; 3], d: [f64; 3], t: &[[f64; 3]; 3]) -> Option<(f64, [f64; 3])> {
+        let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+        let cross = |a: [f64; 3], b: [f64; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+        let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let (e1, e2) = (sub(t[1], t[0]), sub(t[2], t[0]));
+        let h = cross(d, e2);
+        let a = dot(e1, h);
+        if a.abs() < 1e-12 { return None; }
+        let f = 1.0 / a;
+        let q = sub(o, t[0]);
+        let u = f * dot(q, h);
+        if !(0.0..=1.0).contains(&u) { return None; }
+        let r = cross(q, e1);
+        let v = f * dot(d, r);
+        if v < 0.0 || u + v > 1.0 { return None; }
+        let tt = f * dot(e2, r);
+        (tt > 0.0).then_some((tt, [1.0 - u - v, u, v]))
     }
     /// Distance along `d` (unit) from `o` to triangle `t`, both faces (Moller-Trumbore).
     fn ray_tri(o: [f64; 3], d: [f64; 3], t: &[[f64; 3]; 3]) -> Option<f64> {

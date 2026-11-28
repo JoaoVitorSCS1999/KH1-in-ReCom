@@ -29,6 +29,24 @@ pub enum Won {
     Bit(u32),
 }
 
+/// Riku's hairs earned in his story (fork owner, 2026-11-27, verbatim: "modularidade e senso de rencompensa após esforço são
+/// os pontos mais importântes para diversão, então por isso as nossas features de costméticos precisam ser desbloqueádas a
+/// partir da narrativa ou de ações específicas nos jogos"; "um defeito MUITO comum dos jogos é liberar os cosméticos APÓS o
+/// endgame ... precisa estar contida no loop principal"; to "BBS at Vexen (B10), KH2 at Riku Replica I (B8)": "perfeito,
+/// sim!"). `hair`: the `riku_hair` setting (0 Re:CoM's, 1 KH2, 2 BBS); `bits`: Re:CoM's story int (0, 0x2A), whose 0x80 is
+/// Vexen's hall win and 0x400 Riku Replica I's (Checked (decomp + exe + files), [`COUNTED`]).
+pub fn hair_unlocked(hair: u8, bits: u32) -> bool {
+    match hair {
+        0 => true,
+        1 => bits & HAIR_KH2_WIN != 0,
+        _ => bits & HAIR_BBS_WIN != 0,
+    }
+}
+
+/// Riku Replica I's hall bit: the KH2 hair. Vexen's: the BBS hair.
+pub const HAIR_KH2_WIN: u32 = 0x400;
+pub const HAIR_BBS_WIN: u32 = 0x80;
+
 /// The 14 counted fights (names for the log). Maleficent (Fire), the Ansem tutorial (done for Riku at Combat = KH1, Stage 374)
 /// and the final Ansem are not counted. Checked (decomp + exe + files: the reward table `0x14052D760`, the hall scripts' bits),
 /// except Zexion's Dark Mode end (Assumption: it takes the same path).
@@ -91,6 +109,17 @@ pub fn tracked(card: u16) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hairs_are_earned_at_vexen_and_the_replica() {
+        use super::hair_unlocked;
+        // New game: only Re:CoM's hair.
+        assert!(hair_unlocked(0, 0) && !hair_unlocked(1, 0) && !hair_unlocked(2, 0));
+        // Vexen (0x80): BBS; Riku Replica I (0x400): KH2; the other's bit alone does not open it.
+        assert!(hair_unlocked(2, 0x80) && !hair_unlocked(1, 0x80));
+        assert!(hair_unlocked(1, 0x400) && !hair_unlocked(2, 0x400));
+        assert!(hair_unlocked(1, 0x480) && hair_unlocked(2, 0x480));
+    }
+
     use super::*;
 
     #[test]

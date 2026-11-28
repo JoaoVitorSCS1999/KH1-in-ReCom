@@ -594,6 +594,11 @@ impl Kh2HairSource {
     /// A pack made for the KH2-hair skeleton (the 7 extra bones, the hair's channels), `by_slot` as [`crate::kh2_hair_rig::bake`].
     /// 0.197.4: also Riku's event packs (`PLAYER/40x2`), so they play on a 109-bone Riku ([`crate::riku_skin::EVENT_PACKS`]).
     pub fn bake_pack(&self, ann: &[u8], mdl: &[u8], by_slot: bool) -> Result<Option<Vec<u8>>> {
+        self.bake_pack_slots(ann, mdl, if by_slot { crate::kh2_hair_rig::RIKU_SLOTS } else { crate::kh2_hair_rig::NO_SLOTS })
+    }
+
+    /// [`Self::bake_pack`] with any pack's slots (0.198.32: Dark Riku's own pack, [`crate::riku_skin::DARK_SLOTS`]).
+    pub fn bake_pack_slots(&self, ann: &[u8], mdl: &[u8], slots: crate::kh2_hair_rig::Slots) -> Result<Option<Vec<u8>>> {
         let Some(rig) = self.rig(mdl)? else { return Ok(None) };
         let model = mdlx::parse(&self.mdlx).map_err(|e| Error::Format(format!("KH2 {RIKU_MDLX}: {e}")))?;
         let sk0 = crate::mdl::RecomSkeleton::parse(mdl)?;
@@ -602,7 +607,7 @@ impl Kh2HairSource {
         let mut a = crate::ann::Ann::parse(ann)?;
         // every clip has as many bones as the model: the 7 extra ones, then the hair's channels
         crate::kh2_hair_rig::extend_ann(&mut a, sk.bones.len() - sk0.bones.len());
-        crate::kh2_hair_rig::bake(&mut a, rig, &sk, head, &model, &self.motions()?, by_slot)?;
+        crate::kh2_hair_rig::bake_slots(&mut a, rig, &sk, head, &model, &self.motions()?, slots)?;
         Ok(Some(a.to_bytes()))
     }
 
@@ -1083,6 +1088,10 @@ pub(crate) mod tests {
         };
         let mut tris: Vec<([[f64; 3]; 3], [[f64; 2]; 3], bool, u32)> = vec![];
         let mut tri_bones: Vec<[String; 3]> = vec![];
+        // 0.198.33: `GAME_CULL` set: part 3 drawn one-sided as the game does (flag 0 drawn iff its strip order is clockwise on the
+        // monitor, 0x20 iff counter-clockwise; knowledge/ReCoM/recom-model-culling.md), so see-through openings show the background
+        let cull = std::env::var("GAME_CULL").is_ok();
+        let mut flags: Vec<u32> = vec![];
         let mut all_tris = dt::collect(p3);
         if full {
             if let Some(lb) = p3.list_b.as_ref() {
@@ -1103,6 +1112,7 @@ pub(crate) mod tests {
             };
             tris.push((p, uv, hair, ti));
             tri_bones.push(t.v.clone().map(|v| names[v.bone()].clone()));
+            flags.push(t.v[2].q0[0]);
         }
         let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
         // 0.198.7: framed by the body (no head or hair corner) with fixed margins, so a change of hair does not move the picture
@@ -1134,6 +1144,7 @@ pub(crate) mod tests {
         order.sort_by_key(|&i| tris[i].2);
         let tris: Vec<_> = order.iter().map(|&i| tris[i].clone()).collect();
         let tri_bones: Vec<_> = order.iter().map(|&i| tri_bones[i].clone()).collect();
+        let flags: Vec<u32> = order.iter().map(|&i| flags[i]).collect();
         // debug (0.198.6): `PICK=x,y` prints the triangle drawn at that pixel (its corners' bones and texture)
         let pick: Option<(usize, usize)> = std::env::var("PICK").ok().and_then(|v| { let mut it = v.split(',').filter_map(|x| x.parse().ok()); Some((it.next()?, it.next()?)) });
         let mut picked: Option<usize> = None;
@@ -1142,6 +1153,7 @@ pub(crate) mod tests {
             let n = { let a = [p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]]; let b = [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]]; let c = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; let l = (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt().max(1e-12); c[2].abs() / l };
             let det = (s[1][1] - s[2][1]) * (s[0][0] - s[2][0]) + (s[2][0] - s[1][0]) * (s[0][1] - s[2][1]);
             if det.abs() < 1e-9 { continue; }
+            if cull && (((s[1][0] - s[0][0]) * (s[2][1] - s[0][1]) - (s[1][1] - s[0][1]) * (s[2][0] - s[0][0]) > 0.0) != (flags[k] == 0)) { continue; }
             let (x0, x1) = (s.iter().map(|q| q[0]).fold(f64::MAX, f64::min).floor().max(0.0) as usize, (s.iter().map(|q| q[0]).fold(f64::MIN, f64::max).ceil() as usize).min(size - 1));
             let (y0, y1) = (s.iter().map(|q| q[1]).fold(f64::MAX, f64::min).floor().max(0.0) as usize, (s.iter().map(|q| q[1]).fold(f64::MIN, f64::max).ceil() as usize).min(size - 1));
             for y in y0..=y1 { for x in x0..=x1 {
@@ -1617,7 +1629,7 @@ mod dark_probe {
             }
             let src = Kh2HairSource::read(&install::kh2(&g, keys.clone()).unwrap()).unwrap();
             let (t1, t2): (&'static str, &'static str) = if grp == "0201" { ("n_zz120_01", "n_zz120_02") } else { ("n_zz120_11", "n_zz120_12") };
-            let tg = HairTarget { texture: t1, new_texture: "rk_hair_kh2", also: Some(t2) };
+            let tg = HairTarget { texture: t1, new_texture: "rk_hair_kh2", also: Some(t2), neck_skirt: false };
             match src.prepare_mdl(&mdl).and_then(|m| with_hair(&m, &rtm, &hd, &tg, &src)) {
                 Ok(s) => {
                     eprintln!("  KH2: ok, removed {} (of {} on the atlas), skirt {}, nape {}", s.report.removed, s.report.riku_on_atlas, s.report.skirt, s.report.nape);

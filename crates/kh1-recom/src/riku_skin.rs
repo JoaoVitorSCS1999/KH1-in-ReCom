@@ -226,6 +226,88 @@ pub fn group_for(skins: &[Skin], riku: u16, look: Look) -> u16 {
     find(look.hair).or_else(|| find(0)).map_or(riku, |s| s.skin)
 }
 
+/// Dark Riku's two groups (chars 5 / 6: the battle's Dark Mode), as the table holds them. Checked (exe: `0x1405A6910[5 / 6]`).
+pub const DARK_GROUPS: [u16; 2] = [201, 211];
+/// Their motion pack names (`0x1407C6338[5 / 6]`). Checked (exe).
+pub const DARK_ANN_NAMES: [&[u8; 7]; 2] = [b"PL0201\0", b"PL0211\0"];
+
+/// 0.198.30 (fork owner, 2026-11-27: "reparei que quando o personagem se transforma no DarkMode o cabelo é resetado para o Default"): the
+/// manifest's `dark_mode` groups (`[{"dark": 201, "skin": 205, "hair": 2, "blade": 0}, …]`: Dark Riku's group with a hair and a blade),
+/// as skins whose `riku` is Dark Riku's group (their rows copy his, [`add_rows`]; [`group_for`] never picks them for chars 3 / 4). A bad
+/// row is left out alone; older manifests: none.
+/// 0.198.36 (fork owner, 2026-11-27: "no darkmode a keyblade tbm nn troca, já coloca essas regrs para o futuro"): `blade` (0 the Soul
+/// Eater, 1 the Keyblade of People's Hearts; none: 0), and Re:CoM's hair (0) with the Keyblade; one group per (Dark Riku, hair, blade),
+/// never his own look (Re:CoM's hair with the Soul Eater: his own group).
+pub fn dark_mode(text: &str) -> Vec<Skin> {
+    let Ok(v) = crate::json::parse(text) else { return vec![] };
+    let Some(list) = v.get("dark_mode").and_then(|l| l.as_array()) else { return vec![] };
+    let mut out: Vec<Skin> = vec![];
+    for s in list {
+        let g = |k: &str| s.get(k).and_then(|x| x.as_u32());
+        let (Some(dark), Some(skin), Some(hair)) = (g("dark"), g("skin"), g("hair")) else { continue };
+        let (Ok(dark), Ok(skin), Ok(hair), Ok(blade)) = (u16::try_from(dark), u16::try_from(skin), u8::try_from(hair), u8::try_from(g("blade").unwrap_or(0))) else { continue };
+        let ours = skin > 0 && skin < END && !DARK_GROUPS.contains(&skin) && !RIKU_GROUPS.contains(&skin);
+        let look = hair <= 2 && (blade as usize) < BLADES.len() && (hair, blade) != (0, 0);
+        if DARK_GROUPS.contains(&dark) && ours && look && !out.iter().any(|o| (o.riku == dark && o.hair == hair && o.blade == blade) || o.skin == skin) {
+            out.push(Skin { riku: dark, skin, dark: true, blade, hair });
+        }
+    }
+    out
+}
+
+/// 0.198.32 (fork owner, 2026-11-27, asked to choose between 139-bone copies of his packs with a second hook and fitting KH2's hair on
+/// his own hair bones: "a"): the 128-bone packs the battle's Dark Riku plays besides his own (sleights 1087, 1088, 1089, 1093, his dash
+/// 1310, 1311..1313; event packs 4003, 4043, 4083). Checked (files, exe: `kh1_recom_assets::riku_skin::DARK_PACKS`). KH2's hair makes
+/// him 139 bones, so none of them plays on him without its copy.
+pub const DARK_PACK_SOURCES: [u16; 11] = [1087, 1088, 1089, 1093, 1310, 1311, 1312, 1313, 4003, 4043, 4083];
+
+/// The manifest's `dark_packs` ((Re:CoM's pack, its 139-bone copy)): only [`DARK_PACK_SOURCES`], each once, onto a PLAYER group of
+/// 1000..4999 that is no source; anything else is left out. Older manifests: none.
+pub fn dark_packs(text: &str) -> Vec<(u16, u16)> {
+    let Ok(v) = crate::json::parse(text) else { return vec![] };
+    let Some(list) = v.get("dark_packs").and_then(|l| l.as_array()) else { return vec![] };
+    let mut out: Vec<(u16, u16)> = vec![];
+    for p in list {
+        let Some(pair) = p.as_array() else { continue };
+        let g = |i: usize| pair.get(i).and_then(|x| x.as_u32()).filter(|x| (1000..5000).contains(x)).map(|x| x as u16);
+        if let (Some(a), Some(b)) = (g(0), g(1)) {
+            if DARK_PACK_SOURCES.contains(&a) && !DARK_PACK_SOURCES.contains(&b) && !out.iter().any(|o| o.0 == a || o.1 == b) {
+                out.push((a, b));
+            }
+        }
+    }
+    out
+}
+
+/// The battle Dark Riku's hair groups that can be used: KH2's (hair 1, 139 bones) only when every pack of [`DARK_PACK_SOURCES`] has
+/// its copy (else his sleights would freeze him); BBS's (128 bones) always.
+pub fn dark_mode_usable(dm: Vec<Skin>, packs: &[(u16, u16)]) -> Vec<Skin> {
+    let all = DARK_PACK_SOURCES.iter().all(|g| packs.iter().any(|p| p.0 == *g));
+    dm.into_iter().filter(|s| s.hair != 1 || all).collect()
+}
+
+/// The table's entries for chars 5 / 6 (the battle's Dark Riku) in Riku's look: the hair and the blade carry over, the attire is his
+/// (0.198.36). The same rule as Riku's ([`group_for`]): his group with that (blade, hair); a missing one keeps the blade on Re:CoM's
+/// hair; else his own group.
+pub fn dark_entries(skins: &[Skin], look: Look) -> [u32; 2] {
+    DARK_GROUPS.map(|d| group_for(skins, d, dark_look(look)) as u32)
+}
+
+/// Riku's look as the battle's Dark Riku wears it: his Dark Mode attire, the chosen blade and hair (Halloween Town is his group 211).
+pub fn dark_look(look: Look) -> Look {
+    Look { dark: true, halloween: false, ..look }
+}
+
+/// 0.198.36: Dark Riku's groups (201 / 211) with no group of their own for `look`'s (blade, hair), for the log (Re:CoM's hair with the
+/// Soul Eater is his own group: never missing).
+pub fn dark_missing(skins: &[Skin], look: Look) -> Vec<u16> {
+    let l = dark_look(look);
+    if (l.blade, l.hair) == (0, 0) {
+        return vec![];
+    }
+    DARK_GROUPS.into_iter().filter(|&d| !skins.iter().any(|s| s.riku == d && s.dark && s.blade == l.blade && s.hair == l.hair)).collect()
+}
+
 /// The look a group shows (Riku's own: the Default Attire with the Soul Eater).
 pub fn look_of(skins: &[Skin], group: u16) -> Look {
     match skins.iter().find(|s| s.skin == group) {
@@ -240,6 +322,120 @@ mod tests {
 
     fn row(g: u16, k: u16, n: &str) -> PlannedRow {
         PlannedRow { group: g, kind: k, name: RowName::Own(n.into()) }
+    }
+
+    /// Riku's look with a hair and the Soul Eater (the Default Attire).
+    fn hl(hair: u8) -> Look {
+        Look { hair, ..Look::default() }
+    }
+
+    /// 0.198.36 (fork owner, 2026-11-27: "no darkmode a keyblade tbm nn troca, já coloca essas regrs para o futuro"): the battle's Dark
+    /// Riku takes Riku's chosen Keyblade with every hair, whatever Riku's attire (Default, Dark Mode, Halloween Town), by the rule of
+    /// Riku's own looks; a missing (blade, hair) keeps the Keyblade on Re:CoM's hair and is reported; older manifests (no `blade`) read as
+    /// the Soul Eater; his own look is never a row.
+    #[test]
+    fn the_battle_dark_riku_keeps_rikus_keyblade() {
+        let rows: Vec<String> = [(205, 201, 2, 0), (206, 211, 2, 0), (207, 201, 1, 0), (208, 211, 1, 0), (209, 201, 0, 1), (210, 211, 0, 1), (212, 201, 2, 1), (213, 211, 2, 1), (216, 201, 1, 1), (217, 211, 1, 1)]
+            .iter()
+            .map(|(s, d, h, b)| format!(r#"{{"dark": {d}, "skin": {s}, "hair": {h}, "blade": {b}}}"#))
+            .collect();
+        let bad = r#"{"dark": 201, "skin": 218, "hair": 0, "blade": 0}, {"dark": 201, "skin": 219, "hair": 2, "blade": 1}, {"dark": 201, "skin": 220, "hair": 1, "blade": 2}, {"dark": 211, "skin": 209, "hair": 2, "blade": 1}"#;
+        let text = format!(r#"{{"format": 1, "skins": [{{"riku": 101, "skin": 121, "dark": true, "blade": 0}}, {{"riku": 101, "skin": 161, "dark": true, "blade": 1}}], "dark_mode": [{}, {bad}]}}"#, rows.join(", "));
+        let dm = dark_mode(&text);
+        assert_eq!(dm.len(), 10, "his own look, a second (Dark Riku, hair, blade), a blade out of range and a group taken twice are left out: {dm:?}");
+        let mut sk = parse(&text).unwrap();
+        sk.extend(dm);
+        let lk = |dark, blade, halloween, hair| Look { dark, blade, halloween, hair };
+        for (dark, halloween) in [(false, false), (true, false), (false, true)] {
+            assert_eq!(dark_entries(&sk, lk(dark, 0, halloween, 0)), [201, 211], "Soul Eater, Re:CoM's hair: his own");
+            assert_eq!(dark_entries(&sk, lk(dark, 1, halloween, 0)), [209, 210], "Keyblade, Re:CoM's hair");
+            assert_eq!(dark_entries(&sk, lk(dark, 0, halloween, 1)), [207, 208]);
+            assert_eq!(dark_entries(&sk, lk(dark, 1, halloween, 1)), [216, 217], "Keyblade, KH2's hair");
+            assert_eq!(dark_entries(&sk, lk(dark, 0, halloween, 2)), [205, 206]);
+            assert_eq!(dark_entries(&sk, lk(dark, 1, halloween, 2)), [212, 213], "Keyblade, BBS's hair");
+        }
+        assert!(dark_missing(&sk, lk(true, 1, false, 2)).is_empty() && dark_missing(&sk, Look::default()).is_empty());
+        // Riku's own chars 3 / 4 unchanged by his groups
+        assert_eq!(entries(&sk, lk(true, 1, false, 0)), [161, 111]);
+        // a missing combination keeps the Keyblade on Re:CoM's hair (Riku's rule), reported
+        let no_216: Vec<Skin> = sk.iter().copied().filter(|s| s.skin != 216).collect();
+        assert_eq!(dark_entries(&no_216, lk(false, 1, false, 1)), [209, 217]);
+        assert_eq!(dark_missing(&no_216, lk(false, 1, false, 1)), [201]);
+        let no_heart: Vec<Skin> = sk.iter().copied().filter(|s| s.riku < 200 || s.blade == 0).collect();
+        assert_eq!(dark_entries(&no_heart, lk(false, 1, false, 2)), [201, 211], "no Keyblade group at all: his own");
+        assert_eq!(dark_missing(&no_heart, lk(false, 1, false, 2)), [201, 211]);
+        // an older manifest: no `blade`, the Soul Eater
+        assert_eq!(dark_mode(r#"{"format": 1, "skins": [], "dark_mode": [{"dark": 201, "skin": 205, "hair": 2}]}"#), [Skin { riku: 201, skin: 205, dark: true, blade: 0, hair: 2 }]);
+        // the KH2 rows (both blades) wait for the pack copies; the others do not
+        assert_eq!(dark_mode_usable(dark_mode(&text), &[]).iter().map(|s| s.skin).collect::<Vec<_>>(), [205, 206, 209, 210, 212, 213]);
+        assert_eq!(look_of(&sk, 216), lk(true, 1, false, 1));
+    }
+
+    /// 0.198.30: the battle's Dark Riku (chars 5 / 6) takes his hair group; Riku's chars 3 / 4 never do; his rows copy Dark Riku's.
+    #[test]
+    fn the_battle_dark_riku_takes_the_hair() {
+        let text = r#"{"format": 1, "skins": [{"riku": 101, "skin": 121, "dark": true, "blade": 0}, {"riku": 101, "skin": 183, "dark": false, "blade": 0, "hair": 2}, {"riku": 101, "skin": 185, "dark": true, "blade": 0, "hair": 2}], "dark_mode": [{"dark": 201, "skin": 205, "hair": 2}, {"dark": 211, "skin": 206, "hair": 2}, {"dark": 201, "skin": 207, "hair": 2}, {"dark": 101, "skin": 208, "hair": 2}, {"dark": 211, "skin": 201, "hair": 1}, {"dark": 211, "skin": 209, "hair": 0}, {"dark": 201, "skin": 206, "hair": 1}]}"#;
+        let dm = dark_mode(text);
+        assert_eq!(dm, [Skin { riku: 201, skin: 205, dark: true, blade: 0, hair: 2 }, Skin { riku: 211, skin: 206, dark: true, blade: 0, hair: 2 }], "one group per Dark Riku and hair; only his groups; not onto Re:CoM's; a hair");
+        assert!(dark_mode(r#"{"format": 1, "skins": []}"#).is_empty(), "older manifests: none");
+        let mut all = parse(text).unwrap();
+        all.extend(dm);
+        assert_eq!(dark_entries(&all, hl(2)), [205, 206], "BBS kid hair");
+        assert_eq!(dark_entries(&all, hl(0)), [201, 211], "Re:CoM's hair: his own groups");
+        assert_eq!(dark_entries(&all, hl(1)), [201, 211], "KH2's hair: no group for him (139 bones), his own");
+        // chars 3 / 4 are unchanged by his groups
+        let lk = |dark, hair| Look { dark, blade: 0, halloween: false, hair };
+        assert_eq!(entries(&all, lk(false, 2)), [183, 111]);
+        assert_eq!(entries(&all, lk(true, 2)), [185, 111]);
+        assert_eq!(entries(&all, lk(true, 0)), [121, 111]);
+        assert_eq!(entries(&all, Look { halloween: true, ..lk(false, 2) }), [111, 111]);
+        // his rows copy Dark Riku's (201's: no camera / effect link rows of Riku's), retyped to his group
+        let mut t = Vec::new();
+        for (g, n) in [(101, "PL0101"), (201, "PL0201"), (211, "PL0211")] {
+            for (k, e) in [(0xC, "RTM"), (0x13, "TXA"), (0xB, "MDL"), (0x1D, "ANN"), (0x1A, "EET"), (0x30, "SES"), (0x2C, "SND")] {
+                t.push(row(g, k, &format!("PLAYER/0{}/{n}.{e}", &n[3..])));
+            }
+        }
+        t.push(row(END, 0, "end"));
+        let out = add_rows(t, &all[1..].iter().filter(|s| s.skin != 185).copied().collect::<Vec<_>>()).unwrap();
+        let ours: Vec<_> = out.iter().filter(|r| r.group == 205).collect();
+        assert_eq!(ours.len(), 7);
+        assert!(matches!(&ours.iter().find(|r| r.kind == 0xB).unwrap().name, RowName::Own(n) if n == "PLAYER/0205/PL0205.MDL"));
+        assert!(matches!(&ours.iter().find(|r| r.kind == 0x2C).unwrap().name, RowName::Own(n) if n == "PLAYER/0201/PL0201.SND"), "Dark Riku's sound bank");
+        assert!(matches!(&out.iter().find(|r| r.group == 206 && r.kind == 0x2C).unwrap().name, RowName::Own(n) if n == "PLAYER/0211/PL0211.SND"));
+        assert_eq!(ann_name(205), "PL0205");
+        assert_eq!(&DARK_ANN_NAMES[0][..6], ann_name(DARK_GROUPS[0]).as_bytes());
+        assert_eq!(&DARK_ANN_NAMES[1][..6], ann_name(DARK_GROUPS[1]).as_bytes());
+    }
+
+    /// 0.198.32: the battle's Dark Riku takes KH2's hair group only with every copy of his 11 packs; the copies are looked up by id.
+    #[test]
+    fn the_battle_dark_riku_takes_the_kh2_hair_with_his_pack_copies() {
+        let all: Vec<String> = DARK_PACK_SOURCES.iter().map(|g| format!("[{g}, {}]", g + 100)).collect();
+        let text = format!(r#"{{"format": 1, "skins": [{{"riku": 101, "skin": 182, "dark": false, "blade": 0, "hair": 1}}], "dark_mode": [{{"dark": 201, "skin": 205, "hair": 2}}, {{"dark": 211, "skin": 206, "hair": 2}}, {{"dark": 201, "skin": 207, "hair": 1}}, {{"dark": 211, "skin": 208, "hair": 1}}], "dark_packs": [{}, [1092, 1192], [1087, 1999], [4083, 4003], [4002, 4102], [205, 1500]]}}"#, all.join(", "));
+        let packs = dark_packs(&text);
+        assert_eq!(packs, DARK_PACK_SOURCES.map(|g| (g, g + 100)), "his eleven only, each once, never onto a source or out of range");
+        let dm = dark_mode_usable(dark_mode(&text), &packs);
+        assert_eq!(dm.iter().map(|s| (s.riku, s.skin, s.hair)).collect::<Vec<_>>(), [(201, 205, 2), (211, 206, 2), (201, 207, 1), (211, 208, 1)]);
+        let mut sk = parse(&text).unwrap();
+        sk.extend(dm);
+        assert_eq!(dark_entries(&sk, hl(1)), [207, 208], "KH2's hair");
+        assert_eq!(dark_entries(&sk, hl(2)), [205, 206], "BBS's unchanged");
+        assert_eq!(dark_entries(&sk, hl(0)), [201, 211], "Re:CoM's: his own");
+        assert_eq!(entries(&sk, Look { dark: false, blade: 0, halloween: false, hair: 1 }), [182, 111], "Riku's chars 3 / 4 unchanged");
+        // one copy missing: no KH2 group for him (a sleight would freeze), BBS's kept
+        let some = dark_mode_usable(dark_mode(&text), &packs[1..]);
+        assert_eq!(some.iter().map(|s| s.skin).collect::<Vec<_>>(), [205, 206]);
+        assert!(dark_packs(r#"{"format": 1, "skins": []}"#).is_empty(), "older manifests: none");
+        assert_eq!(event_alt_id(&packs, 11087), Some(11187));
+        assert_eq!(event_alt_id(&packs, 14083), Some(14183));
+        assert_eq!(event_alt_id(&packs, 11092), None, "Riku's own sleight: no copy");
+        // their rows: one `.ANN` row each, after the event copies'
+        let rows = vec![PlannedRow { group: 1087, kind: kind::ANN, name: RowName::Own("x".into()) }, PlannedRow { group: END, kind: 0, name: RowName::Own(String::new()) }];
+        let t = add_event_rows(add_event_rows(rows, &[(4002, 4102)]).unwrap(), &packs).unwrap();
+        assert_eq!(t.len(), 2 + 1 + 11);
+        assert!(matches!(&t[2].name, RowName::Own(n) if n == "PLAYER/1187/PL1187.ANN"));
+        assert!(matches!(&t[12].name, RowName::Own(n) if n == "PLAYER/4183/PL4183.ANN") && t[13].group == END);
     }
 
     #[test]

@@ -204,6 +204,8 @@ impl SettingsPage {
                             menu::Item::Costume if v == 1 => (!super::riku_skin::unlocked()).then_some(crate::menu::COSTUME_LOCKED),
                             menu::Item::Costume if v == 2 => (!super::riku_skin::halloween_unlocked()).then_some(crate::menu::RIKU_HALLOWEEN_LOCKED),
                             menu::Item::Blade => (v == 1 && !super::riku_skin::blade_unlocked()).then_some(crate::menu::BLADE_LOCKED),
+                            // 0.198.33: the hairs are earned in his story (BBS: Vexen; KH2: Riku Replica I).
+                            menu::Item::Hair if !super::riku_skin::hair_unlocked(v as u8) => Some(if v == 1 { crate::menu::HAIR_KH2_LOCKED } else { crate::menu::HAIR_BBS_LOCKED }),
                             menu::Item::SoraCostume => (v == 1 && !super::sora_costume::unlocked()).then_some(crate::menu::SORA_COSTUME_LOCKED),
                             _ => None,
                         };

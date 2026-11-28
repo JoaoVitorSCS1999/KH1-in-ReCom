@@ -524,6 +524,13 @@ pub struct Kh1Sora {
     /// The take-off of a jump happened in this frame's state input (`air_speed = recom` keeps 0.8 of
     /// the ground speed then, `0x1401F29F0`).
     took_off: bool,
+    /// Riku's own moves on KH1's rules (fork owner, 2026-11-27): `Some(dark)` while the player is Riku
+    /// (Dark Riku in Dark Mode); his swing pick and swing timings ([`Kh1Sora::set_riku_moves`]).
+    pub riku_moves: Option<bool>,
+    /// Re:CoM's situation of Riku's last swing (`+0x634`), 0 on a new combo.
+    pub riku_prev_sit: u8,
+    /// Sora's own motion entries of the swing requests, put back when Riku's are taken off.
+    sora_swing_entries: Vec<(u16, Option<usize>)>,
 }
 
 /// btltbl's globals the player's clash reactions read (Checked (files): `G+0x1C` 2.5, `G+0x30` 40,
@@ -605,7 +612,41 @@ impl Kh1Sora {
             recom_tilt: 0.0,
             jump_down: false,
             took_off: false,
+            riku_moves: None,
+            riku_prev_sit: 0,
+            sora_swing_entries: Vec::new(),
         }
+    }
+
+    /// Riku's (`Some(dark)`) or Sora's (`None`) swing timings in the motion set: Riku's clip lengths,
+    /// hit windows and Re:CoM's chain window (`crate::riku::swing_motions`) on the requests 200..=206.
+    pub fn set_riku_moves(&mut self, moves: Option<bool>) {
+        if self.riku_moves == moves {
+            return;
+        }
+        if self.sora_swing_entries.is_empty() {
+            self.sora_swing_entries = (200u16..=206).chain([crate::rows::GUARD]).map(|r| (r, self.motions.entry(r))).collect();
+        }
+        match moves {
+            Some(dark) => {
+                let base = Moveset::kh1_defaults().motions;
+                for (r, info) in crate::riku::swing_motions(dark, &base) {
+                    self.motions.add(&[r], info);
+                }
+                if let Some(g) = crate::riku::guard_motion(&base) {
+                    self.motions.add(&[crate::rows::GUARD], g);
+                }
+            }
+            None => {
+                for &(r, e) in &self.sora_swing_entries {
+                    if let Some(e) = e {
+                        self.motions.map_request(r, e);
+                    }
+                }
+            }
+        }
+        self.riku_moves = moves;
+        self.riku_prev_sit = 0;
     }
 
     fn info(&self, r: u16) -> Option<&MotionInfo> {
