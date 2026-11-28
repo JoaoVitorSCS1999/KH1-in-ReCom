@@ -347,6 +347,14 @@ pub(super) unsafe fn reapply(pl: usize) {
     if step <= 0.0 {
         return;
     }
+    // 0.198.28: Riku's ground swing moves and turns as Re:CoM moves him (fork owner, 2026-11-27: his
+    // travel is his own): its exe's homing writes the yaw (`0x1401F5F40`, body `+0x54`) and the
+    // velocity (`0x1401D5630` → `0x1401D5670`, body `+0x80`), with his clip's root; KH1's facing and
+    // displacement written back here would undo them every frame (the 0.198.27 review). His air
+    // swings keep KH1's (KH1's air rows set the air velocity).
+    if is_main_riku(pl) && slot.sora.swing.is_some() && slot.sora.state == kh1_core::controller::state::GROUND {
+        return;
+    }
     let mut h = RecomHost::new(pl);
     h.set_velocity(slot.sora.last_disp * (1.0 / step));
     h.set_facing(slot.sora.facing);
@@ -358,6 +366,21 @@ pub fn installed() -> bool {
 
 pub fn mark_installed() {
     INSTALLED.store(true, Ordering::Release);
+}
+
+static RIKU_REFUSAL_LOG_LEFT: AtomicU32 = AtomicU32::new(200);
+
+/// Riku's refused Attack presses (fork owner, 2026-11-27: "alguns ataques parece que não pegam"): a
+/// press KH1's rules turned down, e.g. after a swing that hit nothing (`LastSwingMissed`).
+fn riku_refusals(events: &[kh1_core::controller::Event]) {
+    use kh1_core::controller::Event;
+    for e in events {
+        if let Event::AttackRefused(r) = e {
+            if RIKU_REFUSAL_LOG_LEFT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+                log(&format!("riku attack: press refused ({r:?})"));
+            }
+        }
+    }
 }
 
 /// The main player (Sora or Riku), 0 before one is made.
@@ -920,6 +943,16 @@ pub(super) unsafe fn run_frame(pl: usize, fresh: bool) {
         *g = Some(Slot { player: pl, sora: Kh1Sora::new(Params::kh1_defaults(), player_abilities(pl)), sync: None, last: FrameOut::default() });
     }
     let Some(slot) = g.as_mut() else { return };
+    // Riku's own swing pick and timings (fork owner, 2026-11-27), Dark Riku's in Dark Mode.
+    let moves = if is_main_riku(pl) { Some(is_main_dark_riku(pl)) } else { None };
+    if slot.sora.riku_moves != moves {
+        log(&format!("riku attack: swing pick and timings: {}", match moves {
+            Some(true) => "Dark Riku's (Re:CoM's 0x140204F80 rules, his clips and windows)",
+            Some(false) => "Riku's (Re:CoM's 0x1401F7520 rules, his clips and windows)",
+            None => "Sora's (KH1's)",
+        }));
+        slot.sora.set_riku_moves(moves);
+    }
     if is_main_riku(pl) {
         // Riku (`crate::riku`): KH1's movement and KH1's Attack (the same picker and rows as
         // Sora's, on his own swing clips: his action table's rows 0x30..). His roll is Re:CoM's own
@@ -953,6 +986,7 @@ pub(super) unsafe fn run_frame(pl: usize, fresh: bool) {
         }
         // 0.152.0: his Guard's start and success move his DP (perfect / missed parries).
         super::dark_points::guard_events(pl, &slot.last.events);
+        riku_refusals(&slot.last.events);
         log_once_riku();
         return;
     }

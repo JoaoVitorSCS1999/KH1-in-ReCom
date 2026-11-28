@@ -107,6 +107,18 @@ pub fn sync_first() -> bool {
 const VAR_GET: u32 = 0x001B_08C0;
 type VarGetFn = unsafe extern "win64" fn(u32, u32) -> u64;
 
+/// Re:CoM's story int (0, 0x2A) in Riku's story (its hall scripts' boss-win bits: Vexen 0x80, Riku Replica I 0x400), None outside
+/// his story or before the variable reader is checked. For his earned hairs (`crate::riku_unlocks::hair_unlocked`).
+pub unsafe fn riku_hall_bits() -> Option<u32> {
+    if !INSTALLED.load(Ordering::Acquire) || !super::stats::riku_story() {
+        return None;
+    }
+    if rd::<usize>(va(base(), crate::keyblades::SAVE_PTR)) == 0 {
+        return None;
+    }
+    Some(super::movement::func::<VarGetFn>(VAR_GET)(0, 0x2A) as u32)
+}
+
 /// Riku's spell levels in his story (0.198.0, `crate::riku_unlocks`): derived from Re:CoM's save (the floor label (0, 0x35), his
 /// boss cards' discovery state, the hall scripts' bits (0, 0x2A)), merged into his save's spell bytes of our block (free in Riku's
 /// save; never lowered), each rise logged. Run at a boss card's first pickup and at each room / battle build

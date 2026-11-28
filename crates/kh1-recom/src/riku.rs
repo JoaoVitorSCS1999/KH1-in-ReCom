@@ -77,25 +77,22 @@ pub fn swing_row(kh1_row: usize) -> usize {
     }
 }
 
-/// Re:CoM's body-guard angle rule (`0x14016F1C0`'s guard branch; Checked (exe: disasm)): the
-/// attack point minus the guarder's bone 0 (`0x14023E6E0`), `atan2f(d.x, d.z)` minus the guarder's
-/// yaw (its mover `+0x54`, `0x1401A4A00`), wrapped to ±π (`0x14016EAA0`), within `half` (KH1's
-/// Guard: ±100°, `KH1_GUARD_ANGLE`). The facing test of the KH1 Guard's blade (0.182.0 Riku's,
-/// 0.183.3 Sora's too).
+/// KH1's Guard facing test (`0x1402B4640` → `0x1402A8C70`; Checked (KH1 decomp), 2026-11-27): the
+/// guarder's flat facing (its yaw, height 0) against the **3D** direction to the attacker, as a
+/// cosine (`dot / (|f| |d|)`), passes at `cos(half)` or more (KH1's record `0x4DA8 +0x64`: −0.1736,
+/// ±100°). A height difference lowers the flat part of the direction, so an attacker above or below
+/// counts as nearer the side (0.198.25; before, a flat yaw test after Re:CoM's body-guard rule
+/// `0x14016F1C0`, which ignored height). The yaw is Re:CoM's (`atan2(d.x, d.z)` convention). The
+/// KH1 Guard blade's facing test (0.182.0 Riku's, 0.183.3 Sora's too).
 pub fn guard_faces(guarder: [f32; 3], yaw: f32, point: [f32; 3], half: f32) -> bool {
-    let (dx, dz) = (point[0] - guarder[0], point[2] - guarder[2]);
-    if dx == 0.0 && dz == 0.0 {
+    let d = [point[0] - guarder[0], point[1] - guarder[1], point[2] - guarder[2]];
+    let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+    if len == 0.0 {
         return true;
     }
-    let pi = std::f32::consts::PI;
-    let mut a = dx.atan2(dz) - yaw;
-    while a > pi {
-        a -= 2.0 * pi;
-    }
-    while a < -pi {
-        a += 2.0 * pi;
-    }
-    a.abs() <= half
+    // KH1's cosine helper returns 0 for a zero vector: 0 ≥ −0.17 passes (straight above / below).
+    let cos = (d[0] * yaw.sin() + d[2] * yaw.cos()) / len;
+    cos >= half.cos()
 }
 
 /// The point Re:CoM's weapon volume puts at the blade's end, in the weapon bone's frame
@@ -214,6 +211,174 @@ pub fn attack_id(sora_id: u32) -> u32 {
     } else {
         sora_id
     }
+}
+
+// ---- Riku's own combo on KH1's rules (fork owner, 2026-11-27, `docs/design-philosophy-instructions.md`
+// § Riku's combat; Re:CoM's chain: `knowledge/ReCoM/recom-riku-combo.md`) ----
+
+/// What Re:CoM's row pick reads about the target (`0x1401F7520`: the target's `+0x50` position into
+/// player `+0x860`, `0x1401A3050` its distance, `0x1401A2E40` its angle). Re:CoM metres.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ComboTarget {
+    /// Target height above Riku minus 1.0 m (`+0x864 − +0x4B4 − 1.0`): > 0 means "above".
+    pub above: f32,
+    /// Distance to the target.
+    pub distance: f32,
+    /// |angle to the target − facing|, radians, 0..=π.
+    pub angle: f32,
+}
+
+/// Re:CoM's opener distance (`0x14050924C` 3.5) and side-swing angles (`0x140599198` π/4,
+/// `0x1405A08C4` 3π/4). Checked (exe + decomp), `recom-riku-combo.md` § 2.
+pub const FAR_OPENER: f32 = 3.5;
+pub const SIDE_FROM: f32 = std::f32::consts::FRAC_PI_4;
+pub const SIDE_TO: f32 = 3.0 * std::f32::consts::FRAC_PI_4;
+
+/// Re:CoM's situation (1..=7, `player+0x630`) of Riku's next swing (`0x1401F7520`; Dark Riku's
+/// `0x140204F80`). `prev` is the last swing's situation (`+0x634`, 0 on a new combo), `finisher`
+/// KH1's counter reached the combo length (Re:CoM: index max − 1). Left out (Assumption): the
+/// `0x1401F0620` probe that turns a 1 into a 6, Dark Riku's `+0x418 & 0x80000` (forces 6).
+pub fn situation(prev: u8, finisher: bool, airborne: bool, dark: bool, target: Option<ComboTarget>) -> u8 {
+    if finisher {
+        return if airborne || (dark && prev == 7) { 7 } else { 4 };
+    }
+    let above = target.is_some_and(|t| t.above > 0.0);
+    match prev {
+        1 | 2 | 6 => {
+            if above || airborne {
+                5
+            } else {
+                3
+            }
+        }
+        3 | 5 => {
+            if airborne {
+                6
+            } else {
+                1
+            }
+        }
+        // A new combo (0), or after a finisher (4 / 7).
+        _ => {
+            if airborne {
+                return if dark { 7 } else { 6 };
+            }
+            match target {
+                None => 1,
+                Some(_) if above => 5,
+                Some(t) if t.distance > FAR_OPENER => 3,
+                Some(t) if SIDE_FROM < t.angle && t.angle < SIDE_TO => 2,
+                Some(_) => 1,
+            }
+        }
+    }
+}
+
+/// The KH1 row that plays situation `sit` (the row whose clip is Re:CoM's row `sit`, `attack::ROW_MAP`).
+/// The rising swing 5 from the ground is KH1's jump-up row (1), which plays the same clip and leaves
+/// the ground; in the air it is the air row 17.
+pub fn situation_row(sit: u8, airborne: bool) -> usize {
+    use kh1_core::data::row;
+    match sit {
+        1 => row::SWING_1,
+        2 => row::SWING_2,
+        3 => row::LUNGE,
+        4 => row::GROUND_FINISHER,
+        5 if airborne => row::AIR_SWING_2,
+        5 => row::JUMP_UP,
+        6 => row::AIR_SWING_1,
+        _ => row::AIR_FINISHER,
+    }
+}
+
+/// The situation a KH1 row plays (the inverse of [`situation_row`]).
+pub fn row_situation(r: usize) -> Option<u8> {
+    use kh1_core::data::row;
+    Some(match r {
+        row::SWING_1 => 1,
+        row::SWING_2 => 2,
+        row::LUNGE => 3,
+        row::GROUND_FINISHER => 4,
+        row::AIR_SWING_2 | row::JUMP_UP => 5,
+        row::AIR_SWING_1 => 6,
+        row::AIR_FINISHER => 7,
+        _ => return None,
+    })
+}
+
+/// Riku's swing clips' lengths in 60 Hz frames, by Re:CoM row 1..=7 (`p002_044, 046, 045, 047, 048,
+/// 049, 050`) and Dark Riku's (`p003_034, 039, 035, 036, 057, 037, 040`): the clips' frame counts at
+/// 30 fps × 2. Checked (files: `PL0101.ANN`, `PL0201.ANN`), `recom-riku-combo.md` § 1; count = length
+/// (not last index) is an Assumption (±1 frame).
+pub const RIKU_CLIP_LENGTHS: [f32; 7] = [48.0, 56.0, 64.0, 80.0, 40.0, 38.0, 54.0];
+pub const DARK_CLIP_LENGTHS: [f32; 7] = [42.0, 64.0, 48.0, 60.0, 44.0, 60.0, 60.0];
+
+/// Re:CoM's earliest chain frame: the next swing starts only past the hit start and past 500 time units
+/// (`0x1401EA6A0`: frame > row `+4` and time > 500 = frame 10; Checked (decomp)), on KH1's frame clock
+/// (Re:CoM's clock + `attack::HIT_LEAD`): frame 12, and the hit start's frame + 1 (0.198.28; 11 and the
+/// hit start before, a frame early).
+pub const CHAIN_NOT_BEFORE: f32 = 12.0;
+
+/// Riku's (or Dark Riku's) KH1 motion entries for the swing requests 200..=206: his clip's length, his
+/// row's hit window as KH1 frames (Re:CoM's byte + `attack::HIT_LEAD`), and a combo window from the
+/// first frame Re:CoM would chain (past the hit start and frame 10) to the clip's end, on the rows
+/// Re:CoM lets chain (`+0xF` bit 0; none on the finishers and Dark 0xA3). KH1's rule "a swing that hit
+/// nothing takes no next press" stays, so the press is taken once the swing has hit, as in Re:CoM
+/// (`+0x644`). Root travel: the clip's own (Re:CoM's), so no KH1 keys; the root-motion bit as KH1's
+/// request map (`base`).
+pub fn swing_motions(dark: bool, base: &kh1_core::MotionSet) -> Vec<(u16, kh1_core::MotionInfo)> {
+    use kh1_core::{FlagKind, MotionInfo};
+    let (rows, lengths) = if dark { (&crate::attack::DARK_ROWS_1_7, &DARK_CLIP_LENGTHS) } else { (&crate::attack::RIKU_ROWS_1_7, &RIKU_CLIP_LENGTHS) };
+    let lead = crate::attack::HIT_LEAD as f32;
+    let mut out = Vec::new();
+    for &(kh1_row, id) in crate::attack::ROW_MAP.iter().take(7) {
+        let request = SWING_REQUESTS[kh1_row_index(kh1_row)];
+        let k = id as usize - 1;
+        let (row, len) = (&rows[k], lengths[k]);
+        let (hs, he) = (row[4] as f32 + lead, row[5] as f32 + lead);
+        let mut info = MotionInfo::new(len).with_flag(FlagKind::Hit(0), hs, he).with_flag(FlagKind::Trail, hs, he);
+        if row[0xF] & 1 != 0 {
+            info = info.with_flag(FlagKind::ComboWindow, (hs + 1.0).max(CHAIN_NOT_BEFORE), len);
+        }
+        info.root_motion = base.info(request).is_some_and(|i| i.root_motion);
+        out.push((request, info));
+    }
+    out
+}
+
+/// Riku's Guard (fork owner, 2026-11-27, verbatim: "assim que apertar o X em teoria ela tem que estar
+/// defendendo igual o KH1, preciso que vc pare de tanto retrabalho sobre esse ponto"; "a defesa é a defesa e
+/// se movendo é esquiva"): KH1's guard motion 212 (54 frames, `base`'s entry) with its guard object live from
+/// the press (frame 0) to KH1's end of the live window (36), not from frame 10. `None` without KH1's entry.
+pub fn guard_motion(base: &kh1_core::MotionSet) -> Option<kh1_core::MotionInfo> {
+    let mut info = base.info(crate::rows::GUARD)?.clone();
+    for f in info.flags.iter_mut().filter(|f| matches!(f.kind, kh1_core::FlagKind::Hit(_))) {
+        f.start = 0.0;
+    }
+    Some(info)
+}
+
+/// Riku's KH1 Strength at Damage = KH1 (fork owner, 2026-11-27: "precisa se assemelhar ao do sora nesse ambito,
+/// dos danos igualmente ao dos mods de acordo com a gameplay do riku do jogo vanilla"; on the numbers: "ss").
+/// Vanilla Re:CoM's ratio of his swing AP to Sora's, on Sora's KH1 Strength at Lv1 with the Kingdom Key (7,
+/// decision 18): Sora's swing AP is 10 × the Kingdom Key's column 0 (100) / 100 = 10, his attack stat 10 at
+/// every level; Riku's is his AP stat (`+0x43C`, 10 at a new game, +1 per AP row) × card 0x12's column 0
+/// (100) / 100; Dark Riku's swings read column 3 (150): AP × 150 / 100 (integer). Strength = 0.7 × that AP,
+/// rounded half up. Checked (files: `BattleCardList` rows 0x01 / 0x12 = 100 / 100 / 150 / 0 and
+/// 100 / 100 / 150 / 150; exe: `0x1401F0BC0`, `0x14023A386`, Dark Riku's pick `0x140204F80`),
+/// `knowledge/ReCoM/recom-combat.md`. Left out (Assumption): the ×1.5 swing of `+0x420 & 0x4000000`
+/// (its trigger `+0x829` not read) and Dark Riku's +20 power of `+0x420 & 0x40000000`.
+pub fn kh1_strength(ap_stat: i32, dark: bool) -> i32 {
+    let ap = if dark { ap_stat.max(0) * 150 / 100 } else { ap_stat.max(0) };
+    (ap * 7 * 2 + 10) / 20
+}
+
+/// KH1's swing requests by `ROW_MAP` order (rows 13, 11, 14, 8, 17, 18, 16 → 200, 201, 202, 203, 205,
+/// 204, 206; `attack::ROW_MAP`'s doc).
+const SWING_REQUESTS: [u16; 7] = [200, 201, 202, 203, 205, 204, 206];
+
+fn kh1_row_index(kh1_row: usize) -> usize {
+    crate::attack::ROW_MAP.iter().position(|&(r, _)| r == kh1_row).unwrap_or(0)
 }
 
 /// Riku's twin of Sora's attack row 1 (`0x1407C6C70` row 0x97). Checked (exe).
@@ -486,6 +651,78 @@ mod tests {
     }
 
     #[test]
+    fn rikus_combo_follows_recoms_pick() {
+        let near = Some(ComboTarget { above: -1.0, distance: 1.5, angle: 0.2 });
+        let far = Some(ComboTarget { above: -1.0, distance: 5.0, angle: 0.2 });
+        let side = Some(ComboTarget { above: -1.0, distance: 1.5, angle: 1.4 });
+        let high = Some(ComboTarget { above: 0.5, distance: 1.5, angle: 0.0 });
+        // Ground, near: 1 -> 3 -> finisher 4 (0x97 -> 0x99 -> 0x9A).
+        assert_eq!(situation(0, false, false, false, near), 1);
+        assert_eq!(situation(1, false, false, false, near), 3);
+        assert_eq!(situation(3, true, false, false, near), 4);
+        // Far opener 3, then 1; side opener 2, then 3; no target 1; above 5.
+        assert_eq!(situation(0, false, false, false, far), 3);
+        assert_eq!(situation(3, false, false, false, far), 1);
+        assert_eq!(situation(0, false, false, false, side), 2);
+        assert_eq!(situation(2, false, false, false, side), 3);
+        assert_eq!(situation(0, false, false, false, None), 1);
+        assert_eq!(situation(0, false, false, false, high), 5);
+        // Air: 6 -> 5 -> finisher 7; after a finisher a new opener.
+        assert_eq!(situation(0, false, true, false, near), 6);
+        assert_eq!(situation(6, false, true, false, near), 5);
+        assert_eq!(situation(5, true, true, false, near), 7);
+        assert_eq!(situation(4, false, false, false, near), 1);
+        // Dark Riku: an air opener is 7; his finisher is 7 after a 7.
+        assert_eq!(situation(0, false, true, true, near), 7);
+        assert_eq!(situation(7, true, false, true, near), 7);
+        // Rows: KH1's row of each clip; the rising swing from the ground is the jump-up.
+        use kh1_core::data::row;
+        assert_eq!((1..=4).map(|s| situation_row(s, false)).collect::<Vec<_>>(), vec![row::SWING_1, row::SWING_2, row::LUNGE, row::GROUND_FINISHER]);
+        assert_eq!((situation_row(5, false), situation_row(5, true), situation_row(6, true), situation_row(7, true)), (row::JUMP_UP, row::AIR_SWING_2, row::AIR_SWING_1, row::AIR_FINISHER));
+        for s in 1..=7 {
+            assert_eq!(row_situation(situation_row(s, s >= 5)), Some(s));
+        }
+    }
+
+    #[test]
+    fn rikus_swing_timings_are_his_clips() {
+        use kh1_core::FlagKind;
+        let base = kh1_core::Moveset::kh1_defaults().motions;
+        let find = |v: &[(u16, kh1_core::MotionInfo)], r: u16| v.iter().find(|(q, _)| *q == r).map(|(_, i)| i.clone()).unwrap();
+        let win = |i: &kh1_core::MotionInfo, k: FlagKind| i.flags.iter().find(|f| f.kind == k).map(|f| (f.start, f.end));
+        let r = swing_motions(false, &base);
+        // 200 = row 0x97 (p002_044, 48): hit 12-26 +1, chain from 14 to 48.
+        let i = find(&r, 200);
+        assert_eq!((i.length, win(&i, FlagKind::Hit(0)), win(&i, FlagKind::ComboWindow)), (48.0, Some((13.0, 27.0)), Some((14.0, 48.0))));
+        // 202 = 0x99 (p002_045, 64): hit 21-39, chain 22-64. 203 = finisher 0x9A (80): no chain.
+        let i = find(&r, 202);
+        assert_eq!((i.length, win(&i, FlagKind::ComboWindow)), (64.0, Some((22.0, 64.0))));
+        let i = find(&r, 203);
+        assert_eq!((i.length, win(&i, FlagKind::Hit(0)), win(&i, FlagKind::ComboWindow)), (80.0, Some((19.0, 49.0)), None));
+        // 204 = air swing 0x9C (38): hit 5-17, chain from frame 12 (Re:CoM's 500 units).
+        let i = find(&r, 204);
+        assert_eq!((i.length, win(&i, FlagKind::ComboWindow)), (38.0, Some((12.0, 38.0))));
+        // Root bit as KH1's request map: ground swings yes, air no.
+        assert!(find(&r, 200).root_motion && !find(&r, 204).root_motion);
+        // Dark: 204 = 0xA3 (60) does not chain; 206 = 0xA4 (60) chains.
+        let d = swing_motions(true, &base);
+        assert_eq!((find(&d, 204).length, win(&find(&d, 204), FlagKind::ComboWindow)), (60.0, None));
+        assert_eq!(win(&find(&d, 206), FlagKind::ComboWindow), Some((12.0, 60.0)));
+        assert_eq!(d.len(), 7);
+        // His Guard: live from the press to 36 (KH1's 10..36), the same 54 frames.
+        let g = guard_motion(&base).unwrap();
+        assert_eq!((g.length, win(&g, FlagKind::Hit(0))), (54.0, Some((0.0, 36.0))));
+        assert_eq!(win(base.info(crate::rows::GUARD).unwrap(), FlagKind::Hit(0)), Some((10.0, 36.0)));
+    }
+
+    #[test]
+    fn rikus_kh1_strength_keeps_vanillas_ratio() {
+        // AP 10: Sora's Lv1 Strength 7; Dark Riku 15 -> 10.5 -> 11; AP 30 -> 21; Dark 45 -> 31.5 -> 32.
+        assert_eq!((kh1_strength(10, false), kh1_strength(10, true)), (7, 11));
+        assert_eq!((kh1_strength(30, false), kh1_strength(30, true), kh1_strength(11, false)), (21, 32, 8));
+    }
+
+    #[test]
     fn rikus_guard_faces_the_front() {
         let half = 1.745_329_3;
         // Yaw 0 faces +z (atan2(x, z) = 0).
@@ -496,6 +733,13 @@ mod tests {
         // Facing −z (yaw π): behind is +z.
         assert!(guard_faces([1.0, 0.0, 1.0], std::f32::consts::PI, [1.0, 0.0, -3.0], half));
         assert!(!guard_faces([1.0, 0.0, 1.0], std::f32::consts::PI, [1.0, 0.0, 4.0], half));
+        // KH1's 3D cosine: 110° behind on the flat but 3 m above is "in front" (cos ≈ −0.11 ≥ −0.17);
+        // the same spot at the guarder's height is not (cos ≈ −0.34).
+        let behind = [110f32.to_radians().sin(), 0.0, 110f32.to_radians().cos()];
+        assert!(!guard_faces([0.0; 3], 0.0, behind, half));
+        assert!(guard_faces([0.0; 3], 0.0, [behind[0], 3.0, behind[2]], half));
+        // Straight above: KH1's zero flat part passes.
+        assert!(guard_faces([0.0; 3], 0.0, [0.0, 2.0, 0.0], half));
     }
 
     #[test]

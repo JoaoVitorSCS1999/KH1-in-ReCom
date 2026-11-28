@@ -44,8 +44,43 @@ type VarSetFn = unsafe extern "win64" fn(u32, u32, i32);
 type ByteSetFn = unsafe extern "win64" fn(u32, u32, u32);
 type CardGiveFn = unsafe extern "win64" fn(u32) -> u64;
 
-/// Riku's tutorial skip (fork, 0.196.0): 0 idle, 1 armed (2102 asked for 1100), 2 the saved writes done (in the battle room).
+/// Riku's first Ansem fight (fork, 0.196.0 skip; 0.198.38 fought): 0 idle, 1 armed (2102 asked for 1100: the fight), 2 Ansem
+/// beaten (the lesson's won-path writes done, the script's exit asked).
 static RIKU_STATE: AtomicU32 = AtomicU32::new(0);
+/// Ansem in room 1100 (set by `super::stats::stat_init`), 0 before he is made or after the win.
+static RIKU_ANSEM: AtomicUsize = AtomicUsize::new(0);
+/// Frames Ansem's HP has sat at exactly 1.
+static RIKU_HELD: AtomicU32 = AtomicU32::new(0);
+
+/// The fight is armed (Ansem's HP is scaled at his stats init).
+pub fn riku_fight_armed() -> bool {
+    RIKU_STATE.load(Ordering::Relaxed) == 1
+}
+
+/// Ansem was made in the fight (`super::stats::stat_init`).
+pub fn riku_ansem_made(enemy: usize, recom_hp: i32, hp: i32) {
+    RIKU_ANSEM.store(enemy, Ordering::Relaxed);
+    RIKU_HELD.store(0, Ordering::Relaxed);
+    note(|| format!("Riku's Ansem fight: Ansem (EN0122) at {hp} HP (Re:CoM's {recom_hp} x {} / {})", ss::RIKU_ANSEM_HP, ss::RIKU_ANSEM_RECOM_HP));
+}
+
+/// The lesson's won-path writes and cards, once, when Ansem is beaten.
+unsafe fn riku_won(how: &str) {
+    for w in ss::RIKU_TUTORIAL_SAVED {
+        apply(*w);
+    }
+    let (id, v) = ss::RIKU_TUTORIAL_BYTE;
+    func::<ByteSetFn>(BYTE_SET)(1, id, v as u32);
+    let mut given = vec![];
+    for c in ss::RIKU_TUTORIAL_CARDS {
+        given.push(format!("{c}:{}", func::<CardGiveFn>(CARD_GIVE)(c as u32) & 0xFF));
+    }
+    let bits = func::<VarGetFn>(VAR_GET)(0, 0x24);
+    RIKU_STATE.store(2, Ordering::Relaxed);
+    RIKU_ANSEM.store(0, Ordering::Relaxed);
+    RIKU_FRAMES.store(0, Ordering::Relaxed);
+    note(|| format!("Riku's Ansem fight won ({how}): the lesson's saved writes ((0, 0x24) = {bits:#x}, byte (1, 4) = 1), world cards given (card:result) {}; its \"done\" bit (1, 2) set so its script leaves through its own exit", given.join(" ")));
+}
 /// Frames seen in the battle room while armed.
 static RIKU_FRAMES: AtomicU32 = AtomicU32::new(0);
 
@@ -129,21 +164,29 @@ pub unsafe fn riku_frame() {
     }
     let (world, room): (i16, i16) = (rd(save + SAVE_WORLD), rd(save + SAVE_ROOM));
     if world == ss::WORLD_RIKU_TUTORIAL && room == ss::RIKU_TUTORIAL_BATTLE {
-        let n = RIKU_FRAMES.fetch_add(1, Ordering::Relaxed);
         if st == 1 {
-            for w in ss::RIKU_TUTORIAL_SAVED {
+            // 0.198.38: the fight. The card lesson stays off and the script not done until Ansem is beaten.
+            for w in ss::RIKU_FIGHT_SESSION {
                 apply(*w);
             }
-            let (id, v) = ss::RIKU_TUTORIAL_BYTE;
-            func::<ByteSetFn>(BYTE_SET)(1, id, v as u32);
-            let mut given = vec![];
-            for c in ss::RIKU_TUTORIAL_CARDS {
-                given.push(format!("{c}:{}", func::<CardGiveFn>(CARD_GIVE)(c as u32) & 0xFF));
+            let ansem = RIKU_ANSEM.load(Ordering::Relaxed);
+            if ansem != 0 {
+                let hp: i32 = rd(ansem + 0x274);
+                let held = if hp == 1 {
+                    RIKU_HELD.fetch_add(1, Ordering::Relaxed) + 1
+                } else {
+                    RIKU_HELD.store(0, Ordering::Relaxed);
+                    0
+                };
+                if hp <= 0 {
+                    riku_won("Ansem's HP 0");
+                } else if held >= ss::RIKU_ANSEM_HELD_AT_1 {
+                    riku_won("Ansem held at 1 HP");
+                }
             }
-            let bits = func::<VarGetFn>(VAR_GET)(0, 0x24);
-            RIKU_STATE.store(2, Ordering::Relaxed);
-            note(|| format!("Riku's Ansem tutorial (battle room 1100) at Combat = KH1: the lesson's saved writes done ((0, 0x24) = {bits:#x}, byte (1, 4) = 1), world cards given (card:result) {}; its \"done\" bit (1, 2) set each frame so its script leaves through its own exit", given.join(" ")));
+            return;
         }
+        let n = RIKU_FRAMES.fetch_add(1, Ordering::Relaxed);
         if n < ss::RIKU_TUTORIAL_GIVE_UP {
             for w in ss::RIKU_TUTORIAL_SESSION {
                 apply(*w);
@@ -153,8 +196,15 @@ pub unsafe fn riku_frame() {
         }
         return;
     }
+    if st == 1 {
+        // left the battle room without beating Ansem (a game over, a reload): disarmed; 2102 asks for the fight again.
+        RIKU_STATE.store(0, Ordering::Relaxed);
+        RIKU_ANSEM.store(0, Ordering::Relaxed);
+        note(|| format!("Riku's Ansem fight left without a win: now world {world} room {room}"));
+        return;
+    }
     if st == 2 {
-        // left the battle room: the duel block stays cleared (only scripts write it), the skip is done
+        // left the battle room: the duel block stays cleared (only scripts write it), the fight is done
         apply(ss::Write::Bit1(0x2A, false));
         let n = RIKU_FRAMES.load(Ordering::Relaxed);
         RIKU_STATE.store(0, Ordering::Relaxed);
@@ -172,7 +222,8 @@ pub unsafe extern "win64" fn battle_entry(arg: u64) -> u64 {
             if ss::riku_tutorial(a, mv::riku_on()) {
                 RIKU_STATE.store(1, Ordering::Relaxed);
                 RIKU_FRAMES.store(0, Ordering::Relaxed);
-                note(|| format!("Riku's Ansem tutorial: battle room 1100 asked from room {} (world {}) at Combat = KH1 with Riku's KH1 combat: armed (the battle room loads, its lesson is done for it)", a.room, a.world));
+                RIKU_ANSEM.store(0, Ordering::Relaxed);
+                note(|| format!("Riku's Ansem fight: battle room 1100 asked from room {} (world {}) at Combat = KH1 with Riku's KH1 combat: armed (fought without the card lesson; its ending runs when Ansem is beaten)", a.room, a.world));
                 return o(arg);
             }
         }

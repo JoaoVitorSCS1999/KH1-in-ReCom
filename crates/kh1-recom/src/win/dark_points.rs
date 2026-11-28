@@ -364,8 +364,9 @@ pub unsafe fn after_damage(pl: usize, before: Option<Before>) {
     event(pl, Event::Hurt { hit: dp::hit_of(kind, boss), in_combo: action == ATTACK || action == CARD_ATTACK, after_roll });
 }
 
-/// Frames of the Guard after which an unblocked one is a missed parry (KH1's guard motion: 60).
-const GUARD_SPAN: u32 = 60;
+/// Frames of the Guard after which an unblocked one is a missed parry: KH1's guard motion 212, 54
+/// frames (`knowledge/KH1/kh1-sora-data.md`, Checked (files)). 60 before 0.198.25 (a wrong length).
+const GUARD_SPAN: u32 = 54;
 /// A block within this many frames of the Guard's start is perfect (the first 10 of its live
 /// frames 10..36: the owner's "parry perfeito", our definition).
 const PERFECT_BY: u32 = 20;

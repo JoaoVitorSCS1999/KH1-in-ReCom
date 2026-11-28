@@ -53,34 +53,68 @@ pub struct HairTarget {
     /// 0.198.7: a second texture of the model with hair on it (Dark Riku's `PL0201`: `n_zz120_02`, 91 hair-bone triangles beside
     /// the 187 on `n_zz120_01`, Checked (files)); its hair triangles are removed the same way, nothing is kept from it for the fit.
     pub also: Option<&'static str>,
+    /// 0.198.33: the open back of the neck ([`in_neck_skirt_window`]) is joined to the hair by a skirt (Dark Riku's model with BBS's
+    /// hair, see [`NECK_SKIRT_Y`]).
+    pub neck_skirt: bool,
+}
+
+/// 0.198.33 (fork owner, 2026-11-27, on the battle's Dark Riku with BBS kid Riku's hair: "percebi que o cabelo do bbs tem alguns
+/// espaços vazios no modo dark mode, testei pulando e atacando"). Checked (files, tests `riku_skin::tests::dark_mode_neck_open_edges`
+/// / `dark_mode_hair_hole_scan`): with Re:CoM's hair and its nape base ([`ALSO_NAPE`]) gone, Dark Riku's neck ends in an open edge
+/// behind (`neck1` / `neck2` 0.8 cm under the head bone and 6.3 cm behind it, `head` / `neck1` 1.8 cm over and 4.4 cm behind, `head`
+/// 3.9 cm over at 7.3 cm out, the face's back edge 6.2 cm over at 9.2 cm out), 1.4 to 2.9 cm from BBS's nearest hair corner. Under the
+/// short hair that opening shows the inside of the neck, which the game culls: the background, worst when his own jumps and swings
+/// turn the head on the neck (`neck1` 3-7 cm off its rest place in the head's frame). KH2's hair (207 / 208) hangs over it. Each open
+/// edge of the kept `head` / `neck*` triangles in this window (head-relative, metres: height range, behind [`NECK_SKIRT_Z`], within
+/// [`NECK_SKIRT_X`]) is joined to its corners' nearest hair corners by two-sided triangles, as the skirt (0.196.15): the bottom follows
+/// the neck, the top the hair. They wear the edge's own texture and texels (the coat's on the neck, the skin's behind the ear), not
+/// the hair's: in his air finisher, swings and jump the band webs out in front of his neck (sides up to 11.2 cm), where it reads as
+/// the neck.
+pub const NECK_SKIRT_Y: [f64; 2] = [-0.03, 0.075];
+/// See [`NECK_SKIRT_Y`].
+pub const NECK_SKIRT_Z: f64 = -0.02;
+/// See [`NECK_SKIRT_Y`].
+pub const NECK_SKIRT_X: f64 = 0.105;
+/// See [`NECK_SKIRT_Y`]: the farthest a corner of the edge may be from its hair corner (metres).
+pub const NECK_SKIRT_REACH: f64 = 0.04;
+/// See [`NECK_SKIRT_Y`]: how much nearer the neck's axis than the edge's corner its hair corner may be (metres).
+pub const NECK_SKIRT_IN: f64 = 0.005;
+/// 0.198.35: how far (metres) the skirt's top corners sit in under the hair corners they end at, toward the head's centre
+/// ([`HEAD_CENTRE`]), on `head`.
+pub const NECK_SKIRT_TUCK: f64 = 0.03;
+
+/// Whether an open edge with midpoint `p` (world rest; `head` = the head bone's rest origin) is in [`NECK_SKIRT_Y`]'s window.
+pub fn in_neck_skirt_window(p: [f64; 3], head: [f64; 3]) -> bool {
+    let r = [p[0] - head[0], p[1] - head[1], p[2] - head[2]];
+    (NECK_SKIRT_Y[0]..=NECK_SKIRT_Y[1]).contains(&r[1]) && r[2] < NECK_SKIRT_Z && r[0].abs() < NECK_SKIRT_X
 }
 
 /// Riku's default attire (`PL0101`) with KH2 Riku's hair ([`crate::kh2_hair`]): the new atlas's name.
-pub const RIKU_0101_KH2: HairTarget = HairTarget { texture: "n_zz110_01", new_texture: "rk_hair_kh2", also: None };
+pub const RIKU_0101_KH2: HairTarget = HairTarget { texture: "n_zz110_01", new_texture: "rk_hair_kh2", also: None, neck_skirt: false };
 
 /// 0.197.2: Riku's Halloween Town attire (`PL0111`, the same skeleton as `PL0101`, Checked (files)) with KH2 Riku's hair. The hair's
 /// texture keeps one name for every group (Re:CoM looks names up globally; the picture is the same).
-pub const RIKU_0111_KH2: HairTarget = HairTarget { texture: "n_zz110_11", new_texture: "rk_hair_kh2", also: None };
+pub const RIKU_0111_KH2: HairTarget = HairTarget { texture: "n_zz110_11", new_texture: "rk_hair_kh2", also: None, neck_skirt: false };
 
 /// 0.197.2: the Halloween Town attire with BBS kid Riku's hair.
 /// 0.198.13: its own texture name. The BBS hair's picture holds each model's temple patches ([`HairSource::painted_temple_window`]),
 /// so it differs per model, and Re:CoM looks names up over every loaded model: with one name, the Dark Form's temples read Riku's
 /// default picture in game (a yellow-orange triangle, the kid's vest; fork owner: "costeleta ficou até pior...").
-pub const RIKU_0111_BBS: HairTarget = HairTarget { texture: "n_zz110_11", new_texture: "rk_hair_bbs_ht", also: None };
+pub const RIKU_0111_BBS: HairTarget = HairTarget { texture: "n_zz110_11", new_texture: "rk_hair_bbs_ht", also: None, neck_skirt: false };
 
 /// The same attire with BBS kid Riku's hair ([`crate::bbs_hair`]).
-pub const RIKU_0101_BBS: HairTarget = HairTarget { texture: "n_zz110_01", new_texture: "rk_hair_bbs", also: None };
+pub const RIKU_0101_BBS: HairTarget = HairTarget { texture: "n_zz110_01", new_texture: "rk_hair_bbs", also: None, neck_skirt: false };
 
 /// 0.198.7 (fork owner, 2026-11-26: "agora implementa todos os cabelos para o a Skin do riku Darkmode tbm"): Dark Riku's model (`PL0201`,
 /// the Dark Form skin's) with KH2 Riku's hair: his hair is on `n_zz120_01` (with the face) and `n_zz120_02` (with the coat). Checked (files).
-pub const RIKU_0201_KH2: HairTarget = HairTarget { texture: "n_zz120_01", new_texture: "rk_hair_kh2", also: Some("n_zz120_02") };
+pub const RIKU_0201_KH2: HairTarget = HairTarget { texture: "n_zz120_01", new_texture: "rk_hair_kh2", also: Some("n_zz120_02"), neck_skirt: false };
 /// The same on his Halloween Town model (`PL0211`).
-pub const RIKU_0211_KH2: HairTarget = HairTarget { texture: "n_zz120_11", new_texture: "rk_hair_kh2", also: Some("n_zz120_12") };
+pub const RIKU_0211_KH2: HairTarget = HairTarget { texture: "n_zz120_11", new_texture: "rk_hair_kh2", also: Some("n_zz120_12"), neck_skirt: false };
 /// Dark Riku's model with BBS kid Riku's hair.
 /// (0.198.13: its own texture name, see [`RIKU_0111_BBS`].)
-pub const RIKU_0201_BBS: HairTarget = HairTarget { texture: "n_zz120_01", new_texture: "rk_hair_bbs_df", also: Some("n_zz120_02") };
+pub const RIKU_0201_BBS: HairTarget = HairTarget { texture: "n_zz120_01", new_texture: "rk_hair_bbs_df", also: Some("n_zz120_02"), neck_skirt: true };
 /// The same on his Halloween Town model.
-pub const RIKU_0211_BBS: HairTarget = HairTarget { texture: "n_zz120_11", new_texture: "rk_hair_bbs_dh", also: Some("n_zz120_12") };
+pub const RIKU_0211_BBS: HairTarget = HairTarget { texture: "n_zz120_11", new_texture: "rk_hair_bbs_dh", also: Some("n_zz120_12"), neck_skirt: true };
 
 /// 0.198.7: the window (head-relative, metres: half-width, lowest and highest height, the most forward depth) in which whole head / neck
 /// triangles of the second hair texture ([`HairTarget::also`]) go with the old hair: the base of Dark Riku's hair over his nape.
@@ -1259,15 +1293,31 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
         for k in keys {
             let (n, pa, pb, va, vb) = edges[&k];
             let mid = [0, 1, 2].map(|i| (pa[i] + pb[i]) / 2.0);
-            if n != 1 || va.bone() != head || vb.bone() != head || !src.skirt_edge(mid, world[head].t) {
+            // 0.198.33: the neck's open back ([`NECK_SKIRT_Y`])
+            let on_neck = |v: &MeshVertex| v.bone() == head || names[v.bone()].starts_with("neck");
+            let nape = n == 1 && target.neck_skirt && on_neck(&va) && on_neck(&vb) && in_neck_skirt_window(mid, world[head].t);
+            if !nape && (n != 1 || va.bone() != head || vb.bone() != head || !src.skirt_edge(mid, world[head].t)) {
                 continue;
             }
-            let (Some((da, ia)), Some((db, ib))) = (nearest(pa), nearest(pb)) else { continue };
-            if !(0.003..=0.030).contains(&da.max(db)) && !(0.003..=0.030).contains(&da.min(db)) {
-                continue;
-            }
-            if da > 0.030 || db > 0.030 {
-                continue;
+            // the nape's: the nearest hair corner not inside the neck (nearer its axis, `neck1`'s, than the edge's corner): a skirt
+            // in to the hair's lowest layer, which dips into the neck, came out through the neck's side as the head turned on it
+            let axis = names.iter().position(|x| x == "neck1").map_or(world[head].t, |i| world[i].t);
+            let radial = |p: [f64; 3]| ((p[0] - axis[0]).powi(2) + (p[2] - axis[2]).powi(2)).sqrt();
+            let nearest_out = |p: [f64; 3]| -> Option<(f64, usize)> {
+                hv.iter().enumerate().filter(|(_, h)| radial(h.0) >= radial(p) - NECK_SKIRT_IN).map(|(i, h)| (crate::math::dist(h.0, p), i)).min_by(|a, b| a.0.total_cmp(&b.0))
+            };
+            let (Some((da, ia)), Some((db, ib))) = (if nape { (nearest_out(pa), nearest_out(pb)) } else { (nearest(pa), nearest(pb)) }) else { continue };
+            if nape {
+                if da.max(db) > NECK_SKIRT_REACH {
+                    continue;
+                }
+            } else {
+                if !(0.003..=0.030).contains(&da.max(db)) && !(0.003..=0.030).contains(&da.min(db)) {
+                    continue;
+                }
+                if da > 0.030 || db > 0.030 {
+                    continue;
+                }
             }
             let area = |p: [[f64; 3]; 3]| -> f64 {
                 let (u, v) = ([p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]], [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]]);
@@ -1276,16 +1326,47 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
             };
             let mut tris: Vec<(MeshVertex, MeshVertex, MeshVertex, [[f64; 3]; 3])> = vec![];
             let (ha, hb) = (hv[ia].clone(), hv[ib].clone());
-            tris.push((on_hair(va, &hb.1), on_hair(vb, &hb.1), hb.1, [pa, pb, hb.0]));
-            if ia != ib {
-                tris.push((on_hair(va, &ha.1), hb.1, ha.1, [pa, hb.0, ha.0]));
+            // 0.198.33 (fork owner, offered the neck skirt in the coat's texture where it webs in front of the neck: "2"): the nape's
+            // skirt wears the edge's own texture and texels (the neck's coat, the face's skin behind the ear), its top corners at the hair
+            // corners with the texel of the edge corner under them, so where it crosses in front of the neck it reads as the neck
+            // 0.198.35 (model-reviewer of 0.198.33: a coat triangle rose ~4 cm into the hair over the middle nape spike and thin dark
+            // slivers poked through the hair, the skirt ending on the hair's outer corners): its top corners are tucked
+            // [`NECK_SKIRT_TUCK`] in under the hair, toward the head's centre, rigid on `head`
+            let centre = [0, 1, 2].map(|k| world[head].t[k] + HEAD_CENTRE[k]);
+            let tucked = |hp: [f64; 3]| -> [f64; 3] {
+                let d = [centre[0] - hp[0], centre[1] - hp[1], centre[2] - hp[2]];
+                let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().max(1e-9);
+                // tests only: `NECK_TUCK=<metres>` (tuning)
+                let t = if cfg!(test) { std::env::var("NECK_TUCK").ok().and_then(|x| x.parse().ok()).unwrap_or(NECK_SKIRT_TUCK) } else { NECK_SKIRT_TUCK };
+                let k = t.min(l) / l;
+                [hp[0] + d[0] * k, hp[1] + d[1] * k, hp[2] + d[2] * k]
+            };
+            // the bone the top corners follow (tests only: `NECK_TOP=edge` puts each on its edge corner's bone, for tuning)
+            let top_on_edge = cfg!(test) && std::env::var("NECK_TOP").is_ok_and(|x| x == "edge");
+            let on_edge = |hp: [f64; 3], v: MeshVertex| {
+                let nb = if top_on_edge { v.bone() } else { head };
+                let q = to_local(&world[nb], &inv[nb], tucked(hp));
+                let bits = |x: f64| (x as f32).to_bits();
+                MeshVertex { q1: [bits(q[0]), bits(q[1]), bits(q[2]), ((nb as u32) << 16) | (nb as u32 * 4)], ..v }
+            };
+            let tex = if nape { va.q2.map_or(hair_tex, |q| q[3]) } else { hair_tex };
+            if nape {
+                tris.push((va, vb, on_edge(hb.0, vb), [pa, pb, tucked(hb.0)]));
+                if ia != ib {
+                    tris.push((va, on_edge(hb.0, vb), on_edge(ha.0, va), [pa, tucked(hb.0), tucked(ha.0)]));
+                }
+            } else {
+                tris.push((on_hair(va, &hb.1), on_hair(vb, &hb.1), hb.1, [pa, pb, hb.0]));
+                if ia != ib {
+                    tris.push((on_hair(va, &ha.1), hb.1, ha.1, [pa, hb.0, ha.0]));
+                }
             }
             for (a, b, c, p) in tris {
                 if area(p) < 1e-7 {
                     continue;
                 }
                 for f in [0u32, 0x20] {
-                    skirt_segs_push(&mut segs3, hair_tex, start_of(a), start_of(b), MeshVertex { q0: [f, F32_ONE, 0, 0x2000], ..c });
+                    skirt_segs_push(&mut segs3, tex, start_of(a), start_of(b), MeshVertex { q0: [f, F32_ONE, 0, 0x2000], ..c });
                 }
                 skirt += 1;
             }

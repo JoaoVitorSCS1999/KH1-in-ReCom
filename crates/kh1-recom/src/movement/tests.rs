@@ -2708,3 +2708,46 @@ fn riku_every_spell_level_and_air_casts_fully() {
         }
     }
 }
+
+// ---- Riku's own combo on KH1's rules (fork owner, 2026-11-27) ----
+
+/// Riku's rows started over `n` frames (ours only: the KH1 oracle is Sora).
+fn riku_rows(p: &mut Pair, n: usize, press: &[usize]) -> (Vec<(usize, usize)>, Vec<(usize, kh1_core::Refused)>) {
+    let (mut rows, mut refused) = (Vec::new(), Vec::new());
+    for k in 0..n {
+        let f = p.step(Pad { attack: press.contains(&k), ..Default::default() });
+        rows.extend(attack_rows(&f.out.events).into_iter().map(|(r, ..)| (k, r)));
+        refused.extend(refusals(&f.out.events).into_iter().map(|r| (k, r)));
+    }
+    (rows, refused)
+}
+
+#[test]
+fn rikus_ground_combo_is_his_own_order_and_rhythm() {
+    use kh1_core::data::row;
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    p.ours.set_riku_moves(Some(false));
+    // A Shadow-sized target 1.5 m ahead (KH1 units, y down).
+    p.target = Some(kh1_core::TargetPart { owner: 1, centre: Vec3::new(0.0, -40.0, 150.0), radius: 40.0 });
+    p.recom.hit = true;
+    // Presses at 1, 20 (swing 1's chain window 13..48) and 45 (the lunge's 21..64, 25 frames in).
+    let (rows, refused) = riku_rows(&mut p, 140, &[1, 20, 45]);
+    assert_eq!(rows.iter().map(|r| r.1).collect::<Vec<_>>(), vec![row::SWING_1, row::LUNGE, row::GROUND_FINISHER], "{rows:?}");
+    assert!(refused.is_empty(), "{refused:?}");
+    // The swings start on the press (Re:CoM's chain cuts the swing once it has hit).
+    assert_eq!(rows.iter().map(|r| r.0).collect::<Vec<_>>(), vec![1, 20, 45]);
+}
+
+#[test]
+fn rikus_far_opener_and_a_miss() {
+    use kh1_core::data::row;
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    p.ours.set_riku_moves(Some(false));
+    // 5 m away: the far opener (Re:CoM's situation 3, the lunge clip).
+    p.target = Some(kh1_core::TargetPart { owner: 1, centre: Vec3::new(0.0, -40.0, 500.0), radius: 40.0 });
+    // Nothing hit: KH1's rule takes no next press in the window.
+    p.recom.hit = false;
+    let (rows, refused) = riku_rows(&mut p, 60, &[1, 30]);
+    assert_eq!(rows.iter().map(|r| r.1).collect::<Vec<_>>(), vec![row::LUNGE]);
+    assert_eq!(refused, vec![(30, kh1_core::Refused::LastSwingMissed)]);
+}

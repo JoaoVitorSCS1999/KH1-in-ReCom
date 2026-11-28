@@ -98,7 +98,7 @@ fn with_state<R>(f: impl FnOnce(&mut Mp) -> R) -> Option<R> {
     if !FIRST_READ_LOGGED.swap(true, Ordering::Relaxed) {
         let (mp, max, c) = l.mp.view();
         log(&format!(
-            "mp: save+{BLOCK_FIRST:#x}: layout v{} ({}), Sora level {level}, Keyblade MP bonus {bonus:+}: MP {mp}/{max}, charge {c}{}",
+            "mp: save+{BLOCK_FIRST:#x}: layout v{} ({}), player level {level}, Keyblade MP bonus {bonus:+}: MP {mp}/{max}, charge {c}{}",
             saved.version,
             if l.fresh { "never written: full MP" } else { "written" },
             if l.level_ups > 0 { format!(", {} max-MP level-up(s) since level {}", l.level_ups, saved.level) } else { String::new() }
@@ -312,7 +312,7 @@ pub fn on_kh1_hit(enemy: usize, kh1_row: Option<usize>) {
         return;
     };
     let why = format!(
-        "row {:#x} +0x2C {}, enemy level {level}{}, Sora level {sora}",
+        "row {:#x} +0x2C {}, enemy level {level}{}, player level {sora}",
         kh1_row.unwrap_or(0),
         record.mp_charge,
         if twin.is_some() { " (twin)" } else { " (no twin)" }

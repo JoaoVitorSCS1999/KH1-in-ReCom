@@ -1925,12 +1925,19 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
 
 /// The manifest: which Riku group each skin group stands for, with its look (Dark Mode attire,
 /// blade 0 Soul Eater / 1 the Keyblade of People's Hearts).
-pub fn manifest_json(skins: &[Made], riku_guard: bool, event_packs: &[(u16, u16)]) -> String {
-    let rows: Vec<String> = skins.iter().map(|m| format!("{{\"riku\": {}, \"skin\": {}, \"dark\": {}, \"blade\": {}, \"hair\": {}}}", m.riku, m.skin, m.dark, m.blade, m.hair)).collect();
+pub fn manifest_json(skins: &[Made], riku_guard: bool, event_packs: &[(u16, u16)], dark_packs: &[(u16, u16)]) -> String {
+    // 0.198.30: the battle Dark Riku's groups ([`DARK_MODE_BBS_HAIR_GROUPS`], `riku` = 201 / 211) under their own key, which older DLLs
+    // ignore (their `skins` take only Riku's 101 / 111).
+    let (dm, sk): (Vec<&Made>, Vec<&Made>) = skins.iter().partition(|m| DARK_MODE_GROUPS.contains(&m.riku));
+    let rows: Vec<String> = sk.iter().map(|m| format!("{{\"riku\": {}, \"skin\": {}, \"dark\": {}, \"blade\": {}, \"hair\": {}}}", m.riku, m.skin, m.dark, m.blade, m.hair)).collect();
+    // 0.198.36: `blade` (0 the Soul Eater, 1 the Keyblade of People's Hearts; older DLLs read none and keep the first row of a hair)
+    let dm: Vec<String> = dm.iter().map(|m| format!("{{\"dark\": {}, \"skin\": {}, \"hair\": {}, \"blade\": {}}}", m.riku, m.skin, m.hair, m.blade)).collect();
     // 0.184.1: `riku_cast`: Riku's and Dark Riku's own packs carry the six cast clips ([`CAST_CLIPS`]).
     // 0.197.4: `event_packs`: (Re:CoM's event pack group, its 109-bone copy) ([`EVENT_PACKS`]).
     let ev: Vec<String> = event_packs.iter().map(|(a, b)| format!("[{a}, {b}]")).collect();
-    format!("{{\"format\": 1, \"skins\": [{}], \"riku_guard\": {riku_guard}, \"riku_cast\": true, \"event_packs\": [{}]}}\n", rows.join(", "), ev.join(", "))
+    // 0.198.32: `dark_packs`: (Re:CoM's pack Dark Riku plays, its 139-bone copy for the KH2 hair) ([`DARK_PACKS`]).
+    let dp: Vec<String> = dark_packs.iter().map(|(a, b)| format!("[{a}, {b}]")).collect();
+    format!("{{\"format\": 1, \"skins\": [{}], \"riku_guard\": {riku_guard}, \"riku_cast\": true, \"event_packs\": [{}], \"dark_mode\": [{}], \"dark_packs\": [{}]}}\n", rows.join(", "), ev.join(", "), dm.join(", "), dp.join(", "))
 }
 
 /// One group made: the Riku group it stands for, and its look.
@@ -2027,6 +2034,165 @@ pub const DARK_BBS_HAIR_GROUPS: [(u16, u16, u16, bool, crate::ddd_hair::HairTarg
     (189, 131, 211, false, crate::ddd_hair::RIKU_0211_BBS),
     (199, 131, 211, true, crate::ddd_hair::RIKU_0211_BBS),
 ];
+
+/// 0.198.30 (fork owner, 2026-11-27: "reparei que quando o personagem se transforma no DarkMode o cabelo é resetado para o Default"; "SIM
+/// pode" to building the hairs for the battle's Dark Riku): Re:CoM's own Dark Mode (Dark Riku, chars 5 / 6, groups 201 / 211, Checked (exe:
+/// `0x140211960` preloads `0x1405A6910[5 / 6]`, the factory `0x14020EC70` builds `CPlayerDRiku` on it)) with BBS kid Riku's hair: (new group,
+/// Dark Riku's group (the base: his model, his own pack with the guard and cast clips the step adds, his EET / SES, RTM / TXA), the atlas).
+/// BBS's hair keeps his 128 bones, so his sleight and event packs (1087-1089, 1093, 1310-1313, 4003, 4043, 4083: 128 bones, Checked (files,
+/// test `probe_pack_bone_counts`)) still play on him. KH2's hair is not built for him: it makes him 139 bones and none of those would play.
+/// Groups 205 / 206: free in Re:CoM's PLAYER table and in Recom.hed (214 / 215 have files there; same test).
+pub const DARK_MODE_BBS_HAIR_GROUPS: [(u16, u16, crate::ddd_hair::HairTarget); 2] = [(205, 201, crate::ddd_hair::RIKU_0201_BBS), (206, 211, crate::ddd_hair::RIKU_0211_BBS)];
+/// Dark Riku's two groups (chars 5 / 6).
+pub const DARK_MODE_GROUPS: [u16; 2] = [201, 211];
+
+/// 0.198.32 (fork owner, 2026-11-27, asked to choose between 139-bone copies of his 11 packs with a second hook at `0x14024ED00` and
+/// fitting KH2's hair on his 18 hair bones: "a"): the battle's Dark Riku (chars 5 / 6) with KH2 Riku's hair: (new group, Dark Riku's
+/// group (the base: his model, his own pack with the guard and cast clips the step adds, his EET / SES, RTM / TXA), the atlas). Groups
+/// 207 / 208: free in Re:CoM's PLAYER table (Checked (exe: the table at `0x1408055D0`, 553 rows; 200..299 holds only 201 / 211)) and in
+/// Recom.hed (test `probe_pack_bone_counts`, `keyblade::tests::new_names_are_not_in_recom_hed`). KH2's hair makes him 139 bones, so
+/// every 128-bone pack he plays gets a copy ([`DARK_PACKS`]); the manifest lists these groups only when all the copies were built.
+pub const DARK_MODE_KH2_HAIR_GROUPS: [(u16, u16, crate::ddd_hair::HairTarget); 2] = [(207, 201, crate::ddd_hair::RIKU_0201_KH2), (208, 211, crate::ddd_hair::RIKU_0211_KH2)];
+
+/// 0.198.36 (fork owner, 2026-11-27: "no darkmode a keyblade tbm nn troca, já coloca essas regrs para o futuro"): the battle's Dark Riku
+/// (chars 5 / 6) in every look the player can choose, one row per (Dark Riku's group, hair, Keyblade): (new group, Dark Riku's group 201 /
+/// 211, hair 0 Re:CoM's / 1 KH2 Riku's / 2 BBS kid Riku's, blade 0 the Soul Eater / 1 the Keyblade of People's Hearts). His own group is
+/// (Re:CoM's hair, the Soul Eater) and has no row. One builder for every row ([`build_dark_mode`]); the DLL picks a row by the rule it uses
+/// for Riku's looks (`kh1-recom`'s `riku_skin::group_for`: a missing (blade, hair) keeps the Keyblade and falls back on Re:CoM's hair).
+/// The Soul Eater rows first: older DLLs read only `hair` and keep the first row of a hair. The Keyblade sits on Dark Riku's model as on
+/// the Dark Form costume's 161 / 171 ([`with_blade`], turned over); its hit volume and trails stay the Soul Eater's (no table of Re:CoM's
+/// changes). The KH2 rows (139 bones) share the pack copies ([`DARK_PACKS`]: one per skeleton, not per blade). Groups 209 / 210, 212 /
+/// 213, 216 / 217: free in Re:CoM's PLAYER table (Checked (exe: `0x1408055D0`, 200..299 holds only 201 / 211), Stage 432) and in
+/// Recom.hed (214 / 215 have files there; tests `probe_pack_bone_counts`, `keyblade::tests::new_names_are_not_in_recom_hed`).
+pub const DARK_MODE_LOOKS: [(u16, u16, u8, u8); 10] = [
+    (205, 201, 2, 0),
+    (206, 211, 2, 0),
+    (207, 201, 1, 0),
+    (208, 211, 1, 0),
+    (209, 201, 0, 1),
+    (210, 211, 0, 1),
+    (212, 201, 2, 1),
+    (213, 211, 2, 1),
+    (216, 201, 1, 1),
+    (217, 211, 1, 1),
+];
+
+/// A row of [`DARK_MODE_LOOKS`] in words, for the step's lines.
+pub fn dark_look_name(hair: u8, blade: u8) -> String {
+    format!("{} and the {}", ["Re:CoM's hair", "KH2 Riku's hair", "BBS kid Riku's hair"].get(hair as usize).unwrap_or(&"?"), if blade == 1 { "Keyblade of People's Hearts" } else { "Soul Eater" })
+}
+
+/// One row of [`DARK_MODE_LOOKS`] (`look`: (new group, Dark Riku's group, hair, blade)), built from Dark Riku's own files (`have`: his pack
+/// as the step wrote it, else Re:CoM's): Re:CoM's hair with the Keyblade = [`build_blade`] on his group; KH2's / BBS's hair = their
+/// builders with the Keyblade or the Soul Eater, on the hair's atlas for his group ([`DARK_MODE_KH2_HAIR_GROUPS`] /
+/// [`DARK_MODE_BBS_HAIR_GROUPS`]). An error when a source the row needs is missing.
+#[allow(clippy::too_many_arguments)]
+pub fn build_dark_mode(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, have: &std::collections::HashMap<String, Vec<u8>>, look: (u16, u16, u8, u8), kh2: Option<&crate::kh2_hair::Kh2HairSource>, bbs: Option<&crate::bbs_hair::BbsHairSource>, blade: Option<&BladeSource>) -> Result<Built> {
+    let (target, dark, hair, b) = look;
+    let blade = match b {
+        0 => None,
+        _ => Some(blade.ok_or_else(|| crate::Error::Format(format!("no Keyblade of People's Hearts (KH1's {BLADE_MODEL})")))?),
+    };
+    let atlas = |groups: &[(u16, u16, crate::ddd_hair::HairTarget)]| groups.iter().find(|x| x.1 == dark).map(|x| x.2).ok_or_else(|| crate::Error::Format(format!("no hair atlas for group {dark}")));
+    let missing = |what: &str| crate::Error::Format(format!("{what} not read"));
+    match (hair, blade) {
+        (0, Some(src)) => build_blade(arc, keys, have, dark, dark, target, true, src),
+        (0, None) => Err(crate::Error::Format(format!("group {target}: Dark Riku's own look (group {dark})"))),
+        (1, _) => build_dark_mode_kh2(arc, keys, have, dark, target, kh2.ok_or_else(|| missing("KH2 Riku's model"))?, &atlas(&DARK_MODE_KH2_HAIR_GROUPS)?, blade),
+        (2, _) => build_dark_mode_bbs(arc, keys, have, dark, target, bbs.ok_or_else(|| missing("BBS kid Riku's model"))?, &atlas(&DARK_MODE_BBS_HAIR_GROUPS)?, blade),
+        _ => Err(crate::Error::Format(format!("group {target}: hair {hair}"))),
+    }
+}
+
+/// Riku's `PL0101.ANN` slot → Dark Riku's `PL0201` / `PL0211.ANN` slot playing the same action row. Checked (exe: the action tables
+/// `0x1407C6300[3]` and `[5]`, 16-byte rows of clip names; row by row: idle 1 → 1, the stance 0x2A `p002_031` → `p003_021`, walk 2 → 2,
+/// row 0x12 `p002_028` → `p003_013`, 0x2B `p002_032` → `p003_022`, run 3 → 3, 0x13 `p002_021` → `p003_014`, 0x2C `p002_033` →
+/// `p003_023`, jump 4 → 4, 0x14 `p002_026` → `p003_096`, fall 5 → 6, 6 → 7, land 7 → 8, 0xF `p002_016` → `p003_011`, damage 0x1F
+/// `p002_037` → `p003_027`, 0x20 `p002_038` → `p003_028`, the first swing 0x30 `p002_044` → `p003_034`; Riku's 79 / 80 (rows 0x18 /
+/// 0x19) have no clip of his). Each pack's slot `n` holds clip `p00x_n` (test `dark_riku_slots_follow_rikus_rows`).
+pub const DARK_SLOT_OF: [(usize, usize); 17] = [(1, 1), (31, 21), (2, 2), (28, 13), (32, 22), (3, 3), (21, 14), (33, 23), (4, 4), (26, 96), (5, 6), (6, 7), (7, 8), (16, 11), (37, 27), (38, 28), (44, 34)];
+
+/// [`crate::kh2_hair_rig::CLIP_MAP`] / [`crate::kh2_hair_rig::UNROLL`] moved to Dark Riku's slots ([`DARK_SLOT_OF`]), so his idle
+/// sways, his walk and run take KH2's walk and run, as on Riku: the KH2 hair's motion on his own pack.
+pub fn dark_slots() -> crate::kh2_hair_rig::Slots<'static> {
+    use crate::kh2_hair_rig as r;
+    static MAP: std::sync::OnceLock<(Vec<(usize, usize)>, Vec<usize>)> = std::sync::OnceLock::new();
+    let (map, unroll) = MAP.get_or_init(|| {
+        let to = |s: usize| DARK_SLOT_OF.iter().find(|x| x.0 == s).map(|x| x.1);
+        (r::CLIP_MAP.iter().filter_map(|&(s, m)| Some((to(s)?, m))).collect(), r::UNROLL.iter().filter_map(|&s| to(s)).collect())
+    });
+    r::Slots { map, unroll }
+}
+
+/// 0.198.32: the 128-bone packs the battle's Dark Riku plays besides his own (Checked (files: `probe_pack_bone_counts`; exe)): his
+/// sleights Dark Break 1087, Dark Firaga 1088, Dark Aura 1089, Inverse Burst 1093, Dark Impulse / Maelstrom / Barrage 1311..1313 (the
+/// sleight → group switch `0x14020F720` → `0x14020FB10`, played by `0x1401F73A0`), his dash 1310 (`0x1401F7290(…, 0x51E, …)` in
+/// `0x1402007E0`, slot 0x140 of `CPlayerDRiku`'s vtable `0x1405A50E8`), and his event packs 4003 / 4043 / 4083 (`0x1401F7290`, the
+/// knowledge note `recom-skeleton-limits.md` § event packs). Both paths end in `0x1401A3580`, which takes the pack by id in
+/// `0x14024D860` (blend ≥ 0) or `0x14024ED00` (blend < 0: most sleight calls pass -1). Each gets a 139-bone copy in group
+/// `+ DARK_ALT` (1187 … 1413, 4103 / 4143 / 4183: free in the PLAYER table and in Recom.hed).
+pub const DARK_PACKS: [u16; 11] = [1087, 1088, 1089, 1093, 1310, 1311, 1312, 1313, 4003, 4043, 4083];
+/// See [`DARK_PACKS`].
+pub const DARK_ALT: u16 = 100;
+
+/// The 139-bone copies of [`DARK_PACKS`] for the KH2 hair on Dark Riku's model `PL<dark>.MDL` (`hair`'s rig): (source group, copy group,
+/// the copy's `.ANN`), every clip with KH2's idle sway on the hair (their slots are not his own pack's). All or an error: a Dark Riku
+/// whose sleight would not play is not built.
+pub fn build_dark_packs(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, dark: u16, hair: &crate::kh2_hair::Kh2HairSource) -> Result<Vec<(u16, u16, Vec<u8>)>> {
+    let mdl = crate::install::read_recom(arc, keys, &path(dark, "MDL"))?;
+    let bones = crate::mdl::RecomSkeleton::parse(&mdl)?.bones.len();
+    let mut out = vec![];
+    for src in DARK_PACKS {
+        let ann = crate::install::read_recom(arc, keys, &path(src, "ANN"))?;
+        let a = Ann::parse(&ann)?;
+        if a.slots.iter().filter_map(|s| s.clip.as_ref()).any(|c| c.bones as usize != bones) {
+            return Err(crate::Error::Format(format!("{}: not {bones} bones", path(src, "ANN"))));
+        }
+        let b = hair.bake_pack(&ann, &mdl, false)?.ok_or_else(|| crate::Error::Format("KH2 hair: no rig".into()))?;
+        out.push((src, src + DARK_ALT, b));
+    }
+    Ok(out)
+}
+
+/// The battle's Dark Riku (`dark`, 201 / 211: his own model and pack as the step wrote them, `have`) with KH2 Riku's hair as group
+/// `target`: [`build_hair_from`], then his pack's hair baked on his own slots ([`dark_slots`]), not Riku's.
+/// 0.198.36: `blade` the Keyblade of People's Hearts (None: the Soul Eater).
+#[allow(clippy::too_many_arguments)]
+pub fn build_dark_mode_kh2(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, have: &std::collections::HashMap<String, Vec<u8>>, dark: u16, target: u16, hair: &crate::kh2_hair::Kh2HairSource, atlas: &crate::ddd_hair::HairTarget, blade: Option<&BladeSource>) -> Result<Built> {
+    let mut b = build_hair_from(arc, keys, have, dark, dark, true, target, blade, hair, atlas)?;
+    let get = |ext: &str| -> Result<Vec<u8>> {
+        let n = path(dark, ext);
+        match have.get(&n) {
+            Some(b) => Ok(b.clone()),
+            None => crate::install::read_recom(arc, keys, &n),
+        }
+    };
+    let ann = hair.bake_pack_slots(&get("ANN")?, &get("MDL")?, dark_slots())?.ok_or_else(|| crate::Error::Format("KH2 hair: no rig".into()))?;
+    let at = path(target, "ANN");
+    let f = b.files.iter_mut().find(|f| f.0 == at).ok_or_else(|| crate::Error::Format(format!("{at} not built")))?;
+    f.1 = ann;
+    Ok(b)
+}
+
+/// The battle's Dark Riku (`dark`, 201 / 211: his own model and pack as the step wrote them, `have`) with BBS kid Riku's hair as group
+/// `target` (0.198.33): [`build_hair_from`], then his pack's hair sway baked on his own slots ([`dark_slots`]), not Riku's (0.198.30
+/// used Riku's map on his pack: his battle stance, slot 21, swayed as the run, 28 as the walk, 33 as the run; model-reviewer of
+/// 0.198.32).
+/// 0.198.36: `blade` the Keyblade of People's Hearts (None: the Soul Eater).
+#[allow(clippy::too_many_arguments)]
+pub fn build_dark_mode_bbs(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, have: &std::collections::HashMap<String, Vec<u8>>, dark: u16, target: u16, hair: &crate::bbs_hair::BbsHairSource, atlas: &crate::ddd_hair::HairTarget, blade: Option<&BladeSource>) -> Result<Built> {
+    // `build_hair_from` gives the source his model (`prepare_mdl`): the rig the re-bake below uses
+    let mut b = build_hair_from(arc, keys, have, dark, dark, true, target, blade, hair, atlas)?;
+    let ann = match have.get(&path(dark, "ANN")) {
+        Some(a) => a.clone(),
+        None => crate::install::read_recom(arc, keys, &path(dark, "ANN"))?,
+    };
+    let ann = hair.bake_ann_slots(&ann, dark_slots().map)?.ok_or_else(|| crate::Error::Format("BBS hair: no sway".into()))?;
+    let at = path(target, "ANN");
+    let f = b.files.iter_mut().find(|f| f.0 == at).ok_or_else(|| crate::Error::Format(format!("{at} not built")))?;
+    f.1 = ann;
+    Ok(b)
+}
 
 /// 0.197.4 (item 1 of Stage 391; the workspace's `knowledge/ReCoM/recom-skeleton-limits.md` § event packs, Checked (decomp, files)):
 /// Riku's event motion packs, 102 bones each (the boss end's card get 4002, and 4012 … 4082 of other event states). Re:CoM plays no
@@ -2224,6 +2390,24 @@ mod tests {
     use super::*;
     use crate::install;
 
+    /// Probe: every PLAYER `.ANN` in Recom.hed with clips at Dark Riku's 128 bones or Riku's 102.
+    #[test]
+    fn probe_pack_bone_counts() {
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        for grp in 1..10000u16 {
+            let n = path(grp, "ANN");
+            if arc.find(&n).is_none() { continue }
+            let Ok(a) = install::read_recom(&arc, &keys, &n).and_then(|b| Ann::parse(&b)) else { eprintln!("{n}: unreadable"); continue };
+            let mut c: std::collections::BTreeMap<u16, Vec<String>> = Default::default();
+            for s in a.slots.iter().filter_map(|s| s.clip.as_ref()) { c.entry(s.bones as u16).or_default().push(s.name_str().to_string()); }
+            if c.contains_key(&128) || c.contains_key(&102) { eprintln!("{grp}: {:?}", c.iter().map(|(k, v)| (k, v.len(), v.first().cloned())).collect::<Vec<_>>()); }
+        }
+        let used: Vec<u16> = (200..300u16).filter(|&grp| ["MDL", "ANN", "RTM", "TXA", "EET", "SES", "BIN", "SND"].iter().any(|e| arc.find(&path(grp, e)).is_some())).collect();
+        eprintln!("PLAYER groups 200..299 with a file in Recom.hed: {used:?}");
+    }
+
     /// With the owner's installs (`RECOM_GAME`): the Keyblade replaces Riku's weapon parts alone
     /// (the other parts byte for byte), on `wep0`, its grip where the Soul Eater's is (the
     /// Keyblade spans the Soul Eater's grip region), turned over on Dark Riku's model.
@@ -2306,6 +2490,554 @@ mod tests {
                     if let Some(r) = b.files.iter().find(|f| f.0 == format!("raw/{}", path(target, "RTM"))) { let _ = std::fs::write(out.join(format!("PL{target:04}.RTM.raw")), &r.1); }
                 }
             }
+        }
+    }
+
+    /// 0.198.30 (owner's install, `RECOM_GAME`): the battle's Dark Riku with BBS kid Riku's hair (205 / 206), built as the step builds
+    /// them: groups free in Recom.hed; Dark Riku's 128 bones (his sleight and event packs are 128); his pack's clips in the same slots
+    /// under the same names (his action rows bind by name), every channel but the hair bones' unchanged; the body's hair changed, the
+    /// coat's list B kept; the `.MDL` the Dark Form's BBS group's (185 / 189, built from the same model with its root renamed) with his
+    /// root name; his own EET / SES; the `.RTM` byte for byte the Dark Form's BBS group's (the
+    /// same texture names, looked up globally, may be loaded together). The models go to `out/dark_mode/` for the renders.
+    #[test]
+    fn the_battle_dark_riku_gets_the_bbs_hair() {
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let bbs = crate::bbs_hair::BbsHairSource::read(&g, &keys).unwrap();
+        // 0.198.32: his pack as the step writes it (KH1's guard sets, BBS Terra's casts: the guard `p003_225` / `p003_226` included)
+        let src = StepSources::read(&g, &keys).expect("the step's KH1 sources");
+        let have = step_have(&arc, &keys, &src);
+        assert!(Ann::parse(&have[&path(201, "ANN")]).unwrap().find(DARK_GUARD).is_some(), "the step's pack");
+        let out = std::path::PathBuf::from(format!("{}/local/assets/recom/riku-hair/out/dark_mode", crate::kh2_motion::tests::workspace()));
+        let _ = std::fs::create_dir_all(&out);
+        for (&(target, dark, atlas), form) in DARK_MODE_BBS_HAIR_GROUPS.iter().zip([185u16, 189]) {
+            assert!(arc.find(&path(target, "MDL")).is_none() && arc.find(&path(target, "ANN")).is_none(), "group {target} is free in Recom.hed");
+            let b = build_dark_mode_bbs(&arc, &keys, &have, dark, target, &bbs, &atlas, None).unwrap();
+            let file = |n: String| b.files.iter().find(|f| f.0 == n).unwrap_or_else(|| panic!("{n}")).1.clone();
+            let (mdl, ann) = (file(path(target, "MDL")), Ann::parse(&file(path(target, "ANN"))).unwrap());
+            let sk = RecomSkeleton::parse(&mdl).unwrap();
+            let base_mdl = install::read_recom(&arc, &keys, &path(dark, "MDL")).unwrap();
+            let base_sk = RecomSkeleton::parse(&base_mdl).unwrap();
+            assert_eq!(sk.bones.len(), 128, "{target}: Dark Riku's bone count");
+            assert_eq!(sk.bones.iter().map(|x| &x.name).collect::<Vec<_>>(), base_sk.bones.iter().map(|x| &x.name).collect::<Vec<_>>(), "{target}: his bones");
+            let base_ann = Ann::parse(&have[&path(dark, "ANN")]).unwrap();
+            assert_eq!(ann.slots.len(), base_ann.slots.len(), "{target}: slots");
+            let mut hair_moved = 0;
+            for (s0, s1) in base_ann.slots.iter().zip(&ann.slots) {
+                let (Some(c0), Some(c1)) = (s0.clip.as_ref(), s1.clip.as_ref()) else { assert!(s0.clip.is_none() && s1.clip.is_none(), "{target}: a slot's clip"); continue };
+                assert_eq!((c0.name_str(), c0.frames, c0.loop_start, c0.flags, c1.bones), (c1.name_str(), c1.frames, c1.loop_start, c1.flags, 128), "{target}");
+                let ch = c0.chans();
+                for bi in 0..128 {
+                    let same = c0.channels[bi * ch..(bi + 1) * ch] == c1.channels[bi * ch..(bi + 1) * ch];
+                    if base_sk.bones[bi].name.contains("hair") {
+                        hair_moved += !same as usize;
+                    } else {
+                        assert!(same, "{target} {}: bone {bi} {} changed", c0.name_str(), base_sk.bones[bi].name);
+                    }
+                }
+            }
+            let (old, new) = (crate::mdl::split_parts(&base_mdl).unwrap(), crate::mdl::split_parts(&mdl).unwrap());
+            assert_ne!(old[3], new[3], "{target}: the body's hair changed");
+            let lb = |p: &[u8]| crate::mdl::MdlPart::parse_bytes(p).unwrap().list_b.as_ref().map(|l| l.len());
+            assert_eq!(lb(&new[3]), lb(&old[3]), "{target}: the coat's list B kept");
+            for ext in ["EET", "SES"] {
+                assert!(file(path(target, ext)) == have[&path(dark, ext)], "{target}: his own {ext}");
+            }
+            let skin_base = if dark == 201 { 121 } else { 131 };
+            let dform = build_hair_from(&arc, &keys, &have, skin_base, dark, true, form, None, &bbs, &atlas).unwrap();
+            let rtm = |b: &Built, gr: u16| b.files.iter().find(|f| f.0 == format!("raw/{}", path(gr, "RTM"))).unwrap().1.clone();
+            assert!(rtm(&b, target) == rtm(&dform, form), "{target}: the .RTM is the Dark Form group {form}'s");
+            let form_mdl = &dform.files.iter().find(|f| f.0 == path(form, "MDL")).unwrap().1;
+            assert!(&rename_root(&mdl).unwrap() == form_mdl, "{target}: the .MDL is the Dark Form group {form}'s with Dark Riku's root name");
+            assert_eq!(sk.bones[1].name, base_sk.bones[1].name, "{target}: his root name");
+            eprintln!("group {target}: {} bones, {} clips, hair channels changed in {hair_moved} bone-clips", sk.bones.len(), b.clips);
+            let _ = std::fs::write(out.join(format!("PL{target:04}.MDL")), &mdl);
+            let _ = std::fs::write(out.join(format!("PL{target:04}.ANN")), file(path(target, "ANN")));
+            let _ = std::fs::write(out.join(format!("PL{target:04}.RTM.raw")), rtm(&b, target));
+        }
+        let made = [Made { riku: 101, skin: 121, dark: true, blade: 0, hair: 0 }, Made { riku: 201, skin: 205, dark: true, blade: 0, hair: 2 }];
+        let j = manifest_json(&made, true, &[], &[]);
+        assert!(j.contains("\"skins\": [{\"riku\": 101, \"skin\": 121") && j.contains("\"dark_mode\": [{\"dark\": 201, \"skin\": 205, \"hair\": 2, \"blade\": 0}]"), "{j}");
+    }
+
+    /// The asset step's Riku sources (KH1 Riku's guard set, Riku-Ansem's, BBS Terra's), read as `step.rs` reads them.
+    pub(crate) struct StepSources {
+        mset: Vec<u8>,
+        mdls: Vec<u8>,
+        ansem: Option<(Vec<u8>, Vec<u8>)>,
+        terra: Option<(RecomSkeleton, Vec<crate::pam::PamClip>)>,
+    }
+    impl StepSources {
+        pub(crate) fn read(g: &std::path::Path, keys: &kh1_formats::egs::KeyTable) -> Option<StepSources> {
+            let k1 = install::kh1(g, keys.clone()).ok()?;
+            let ansem = k1.read("xa_ex_1580.mset").ok().zip(k1.read("xa_ex_1580.mdls").ok());
+            Some(StepSources { mset: k1.read("xa_ex_1010.mset").ok()?, mdls: k1.read("xa_ex_1010.mdls").ok()?, ansem, terra: crate::terra::read_terra(g, keys).ok() })
+        }
+        pub(crate) fn guard(&self) -> GuardSource<'_> {
+            GuardSource { mset: &self.mset, mdls: &self.mdls, ansem: self.ansem.as_ref().map(|(a, b)| (a.as_slice(), b.as_slice())), terra: self.terra.as_ref().map(|(k, c)| (k, c.as_slice())) }
+        }
+    }
+
+    /// The files the step writes for Riku's skins (`have`), from its real sources.
+    fn step_have(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, src: &StepSources) -> std::collections::HashMap<String, Vec<u8>> {
+        let mut have = std::collections::HashMap::new();
+        for &(riku, dark, skin) in &SKIN_GROUPS {
+            for (rel, bytes) in build_with(arc, keys, riku, dark, skin, Some(&src.guard())).unwrap().files {
+                have.insert(rel, bytes);
+            }
+        }
+        have
+    }
+
+    /// 0.198.32: Dark Riku's slots play the rows Riku's [`DARK_SLOT_OF`] slots play (`p00x_n` in slot `n` of both packs; the rows are
+    /// the exe's, Checked by hand there), and [`dark_slots`] gives his idle / walk / run / swing slots KH2's idle / walk / run / swing.
+    #[test]
+    fn dark_riku_slots_follow_rikus_rows() {
+        use crate::kh2_hair_rig as r;
+        let s = dark_slots();
+        let of = |slot: usize| s.map.iter().find(|x| x.0 == slot).map(|x| x.1);
+        assert_eq!((of(1), of(21), of(2), of(3), of(34), of(96)), (Some(r::KH2_IDLE), Some(r::KH2_IDLE), Some(r::KH2_WALK), Some(r::KH2_RUN), Some(r::KH2_SWING), Some(r::KH2_JUMP)));
+        assert_eq!(of(33), None, "Dark Riku's 33 is a swing, not Riku's run");
+        assert_eq!(s.unroll, [1, 21]);
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        for (riku, dark) in [(101u16, 201u16), (111, 211)] {
+            let (a, b) = (Ann::parse(&install::read_recom(&arc, &keys, &path(riku, "ANN")).unwrap()).unwrap(), Ann::parse(&install::read_recom(&arc, &keys, &path(dark, "ANN")).unwrap()).unwrap());
+            for &(rs, ds) in &DARK_SLOT_OF {
+                let name = |x: &Ann, i: usize| x.slots.get(i).and_then(|s| s.clip.as_ref()).map(|c| c.name_str().to_string());
+                assert_eq!(name(&a, rs), Some(format!("p002_{rs:03}")));
+                assert_eq!(name(&b, ds), Some(format!("p003_{ds:03}")), "group {dark} slot {ds}");
+                let (ca, cb) = (a.slots[rs].clip.as_ref().unwrap(), b.slots[ds].clip.as_ref().unwrap());
+                if [1, 31, 2, 28, 32, 3, 21, 33, 26, 6].contains(&rs) {
+                    assert!(ca.looped() && cb.looped(), "{rs} -> {ds}: both loop");
+                }
+            }
+        }
+    }
+
+    /// 0.198.32 (`RECOM_GAME`, the step's real sources: KH1's guard sets and BBS Terra's casts): the battle's Dark Riku with KH2 Riku's
+    /// hair (207 / 208) and the 139-bone copies of his 11 other packs. Groups and copies free in Recom.hed; the model 139 bones, his 128
+    /// first with his names; his pack (the guard and cast clips included) in the same slots, every clip 139 bones, every non-hair
+    /// channel byte-equal; the `.RTM` the Dark Form KH2 group 184 / 188's (texture names are looked up globally); every copy all
+    /// clips 139 bones, slots / frames / loop / flags as Re:CoM's, non-hair channels byte-equal; the hair moves in each copy.
+    #[test]
+    fn the_battle_dark_riku_gets_the_kh2_hair() {
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let src = StepSources::read(&g, &keys).expect("the step's KH1 sources");
+        assert!(src.terra.is_some(), "BBS Terra's casts, as the step reads them");
+        let have = step_have(&arc, &keys, &src);
+        let hair = crate::kh2_hair::Kh2HairSource::read(&install::kh2(&g, keys.clone()).unwrap()).unwrap();
+        let out = std::path::PathBuf::from(format!("{}/local/assets/recom/riku-hair/out/dark_mode", crate::kh2_motion::tests::workspace()));
+        let _ = std::fs::create_dir_all(&out);
+        let mut bones = 0;
+        for (&(target, dark, atlas), form) in DARK_MODE_KH2_HAIR_GROUPS.iter().zip([184u16, 188]) {
+            for ext in ["MDL", "ANN", "EET", "SES", "RTM", "TXA"] {
+                assert!(arc.find(&path(target, ext)).is_none(), "group {target} is free in Recom.hed");
+            }
+            let b = build_dark_mode_kh2(&arc, &keys, &have, dark, target, &hair, &atlas, None).unwrap();
+            let file = |n: String| b.files.iter().find(|f| f.0 == n).unwrap_or_else(|| panic!("{n}")).1.clone();
+            let (mdl, ann) = (file(path(target, "MDL")), Ann::parse(&file(path(target, "ANN"))).unwrap());
+            let sk = RecomSkeleton::parse(&mdl).unwrap();
+            let base_mdl = install::read_recom(&arc, &keys, &path(dark, "MDL")).unwrap();
+            let base_sk = RecomSkeleton::parse(&base_mdl).unwrap();
+            bones = sk.bones.len();
+            assert_eq!(bones, 139, "{target}: KH2's hair on Dark Riku");
+            assert_eq!(sk.bones[..128].iter().map(|x| &x.name).collect::<Vec<_>>(), base_sk.bones.iter().map(|x| &x.name).collect::<Vec<_>>(), "{target}: his bones first");
+            let base_ann = Ann::parse(&have[&path(dark, "ANN")]).unwrap();
+            assert!(base_ann.find(DARK_GUARD).is_some() && base_ann.find(DARK_RECOIL).is_some() && CAST_CLIPS.iter().all(|c| base_ann.find(&format!("p003_{}", c.suffix)).is_some()), "{dark}: the step's pack (guard, casts)");
+            assert_eq!(ann.slots.len(), base_ann.slots.len(), "{target}: slots");
+            let mut hair_moved = 0;
+            for (s0, s1) in base_ann.slots.iter().zip(&ann.slots) {
+                let (Some(c0), Some(c1)) = (s0.clip.as_ref(), s1.clip.as_ref()) else { assert!(s0.clip.is_none() && s1.clip.is_none(), "{target}: a slot's clip"); continue };
+                // his idle loops (slots 1 / 21) are unrolled to a whole number of KH2 idle loops, as Riku's (`kh2_hair_rig::UNROLL`)
+                let slot = base_ann.slots.iter().position(|x| std::ptr::eq(x, s0)).unwrap();
+                let times = c1.frames as usize / c0.frames.max(1) as usize;
+                assert!(c1.frames == c0.frames || (dark_slots().unroll.contains(&slot) && c1.frames as usize == c0.frames as usize * times), "{target} slot {slot}: {} -> {} frames", c0.frames, c1.frames);
+                assert_eq!((c0.name_str(), c0.loop_start, c0.flags, c1.bones), (c1.name_str(), c1.loop_start, c1.flags, 139), "{target}");
+                let (ch0, ch1) = (c0.chans(), c1.chans());
+                for bi in 0..128 {
+                    let same = if c1.frames == c0.frames {
+                        c0.channels[bi * ch0..(bi + 1) * ch0] == c1.channels[bi * ch1..(bi + 1) * ch1]
+                    } else {
+                        (0..c1.frames as usize).all(|f| (0..ch0).all(|ci| (c0.value(bi, ci, (f % c0.frames as usize) as f64) - c1.value(bi, ci, f as f64)).abs() < 1e-3))
+                    };
+                    if base_sk.bones[bi].name.contains("hair") {
+                        hair_moved += !same as usize;
+                    } else {
+                        assert!(same, "{target} {}: bone {bi} {} changed", c0.name_str(), base_sk.bones[bi].name);
+                    }
+                }
+            }
+            assert!(hair_moved > 0, "{target}: the hair is KH2's");
+            for ext in ["EET", "SES"] {
+                assert!(file(path(target, ext)) == have[&path(dark, ext)], "{target}: his own {ext}");
+            }
+            let skin_base = if dark == 201 { 121 } else { 131 };
+            let dform = build_hair_from(&arc, &keys, &have, skin_base, dark, true, form, None, &hair, &atlas).unwrap();
+            let rtm = |b: &Built, gr: u16| b.files.iter().find(|f| f.0 == format!("raw/{}", path(gr, "RTM"))).unwrap().1.clone();
+            assert!(rtm(&b, target) == rtm(&dform, form), "{target}: the .RTM is the Dark Form KH2 group {form}'s");
+            eprintln!("group {target}: {} bones, {} clips, hair channels changed in {hair_moved} bone-clips; .MDL {} B, .ANN {} B", sk.bones.len(), b.clips, mdl.len(), file(path(target, "ANN")).len());
+            let _ = std::fs::write(out.join(format!("PL{target:04}.MDL")), &mdl);
+            let _ = std::fs::write(out.join(format!("PL{target:04}.ANN")), file(path(target, "ANN")));
+            let _ = std::fs::write(out.join(format!("PL{target:04}.RTM.raw")), rtm(&b, target));
+        }
+        // the copies (on 201's model; 211's skeleton gives the same bytes)
+        let packs = build_dark_packs(&arc, &keys, 201, &hair).unwrap();
+        assert_eq!(packs.iter().map(|p| (p.0, p.1)).collect::<Vec<_>>(), DARK_PACKS.map(|g| (g, g + DARK_ALT)), "all eleven");
+        // a fresh source: the rig is kept per skeleton (by bone names), so 211's own rest decides here
+        let packs_211 = build_dark_packs(&arc, &keys, 211, &crate::kh2_hair::Kh2HairSource::read(&install::kh2(&g, keys.clone()).unwrap()).unwrap()).unwrap();
+        let sk = RecomSkeleton::parse(&install::read_recom(&arc, &keys, &path(201, "MDL")).unwrap()).unwrap();
+        let mut total = 0;
+        for ((src_g, alt, bytes), (_, _, b211)) in packs.iter().zip(&packs_211) {
+            assert!(arc.find(&path(*alt, "ANN")).is_none(), "{alt} is free in Recom.hed");
+            assert!(bytes == b211, "{alt}: the same copy on 211's model");
+            let (a0, a1) = (Ann::parse(&install::read_recom(&arc, &keys, &path(*src_g, "ANN")).unwrap()).unwrap(), Ann::parse(bytes).unwrap());
+            assert_eq!(a0.slots.len(), a1.slots.len(), "{alt}");
+            let mut moved = 0;
+            for (s0, s1) in a0.slots.iter().zip(&a1.slots) {
+                let (Some(c0), Some(c1)) = (s0.clip.as_ref(), s1.clip.as_ref()) else { assert!(s0.clip.is_none() && s1.clip.is_none()); continue };
+                assert_eq!(c1.bones as usize, bones, "{alt}: {bones} bones");
+                assert_eq!((c0.name_str(), c0.frames, c0.loop_start, c0.flags), (c1.name_str(), c1.frames, c1.loop_start, c1.flags), "{alt}");
+                let (ch0, ch1) = (c0.chans(), c1.chans());
+                for bi in 0..128 {
+                    let same = c0.channels[bi * ch0..(bi + 1) * ch0] == c1.channels[bi * ch1..(bi + 1) * ch1];
+                    if sk.bones[bi].name.contains("hair") {
+                        moved += !same as usize;
+                    } else {
+                        assert!(same, "{alt} {}: bone {bi} {} changed", c0.name_str(), sk.bones[bi].name);
+                    }
+                }
+            }
+            assert!(moved > 0, "{alt}: the hair is KH2's");
+            total += bytes.len();
+            let _ = std::fs::write(out.join(format!("PL{alt:04}.ANN")), bytes);
+        }
+        eprintln!("Dark Riku's pack copies: {} ({bones} bones), {total} B", packs.len());
+        let made = [Made { riku: 201, skin: 205, dark: true, blade: 0, hair: 2 }, Made { riku: 201, skin: 207, dark: true, blade: 0, hair: 1 }];
+        let j = manifest_json(&made, true, &[], &[(1087, 1187), (4083, 4183)]);
+        assert!(j.contains("\"dark_mode\": [{\"dark\": 201, \"skin\": 205, \"hair\": 2, \"blade\": 0}, {\"dark\": 201, \"skin\": 207, \"hair\": 1, \"blade\": 0}]") && j.contains("\"dark_packs\": [[1087, 1187], [4083, 4183]]"), "{j}");
+    }
+
+    /// 0.198.36 (fork owner, 2026-11-27: "no darkmode a keyblade tbm nn troca, já coloca essas regrs para o futuro"; `RECOM_GAME`, the
+    /// step's real sources): every Keyblade row of [`DARK_MODE_LOOKS`] built by [`build_dark_mode`] as the step builds it. Each group free
+    /// in Recom.hed; its Soul Eater twin (same Dark Riku, same hair: his own group for Re:CoM's hair) differs only in the weapon: the
+    /// body parts byte for byte, the pack / EET / SES byte for byte (the motion, the hit and trail events stay the Soul Eater's), the
+    /// TXA the same; the weapon's vertices (bone, position) those of the Dark Form costume's Keyblade group (161 / 171) on the same
+    /// `wep0`, its texture [`BLADE_TEXTURE`] in the RTM; the KH2 rows 139 bones (the pack copies' count). The models go to
+    /// `out/dark_mode/` for the renders; sizes printed.
+    #[test]
+    fn the_battle_dark_riku_keeps_the_keyblade() {
+        use crate::mdl::{split_parts, MdlPart};
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let src = StepSources::read(&g, &keys).expect("the step's KH1 sources");
+        let have = step_have(&arc, &keys, &src);
+        let kh2 = crate::kh2_hair::Kh2HairSource::read(&install::kh2(&g, keys.clone()).unwrap()).unwrap();
+        let bbs = crate::bbs_hair::BbsHairSource::read(&g, &keys).unwrap();
+        let Ok((_, assets, _)) = install::kh1(&g, keys.clone()).unwrap().read_full(BLADE_MODEL) else { panic!("KH1's {BLADE_MODEL}") };
+        let heart = BladeSource::from_assets(&assets).unwrap();
+        let out = std::path::PathBuf::from(format!("{}/local/assets/recom/riku-hair/out/dark_mode", crate::kh2_motion::tests::workspace()));
+        let _ = std::fs::create_dir_all(&out);
+        let file = |b: &Built, n: String| b.files.iter().find(|f| f.0 == n).unwrap_or_else(|| panic!("{n}")).1.clone();
+        let weapon = |mdl: &[u8]| -> (Vec<(usize, [i32; 3])>, Vec<String>) {
+            let p1 = MdlPart::parse_bytes(&split_parts(mdl).unwrap()[1]).unwrap();
+            let v = p1.list_a.iter().chain(p1.list_b.iter().flatten()).flat_map(|k| k.verts.iter()).map(|v| (v.bone(), v.pos().map(|x| (x * 1e4).round() as i32))).collect();
+            (v, p1.texture_names())
+        };
+        // the Dark Form costume's Keyblade groups, as the step builds them (the reference for the grip)
+        let form: Vec<(u16, Built)> = [(121u16, 201u16, 161u16), (131, 211, 171)].iter().map(|&(base, raw, t)| (raw, build_blade(&arc, &keys, &have, base, raw, t, true, &heart).unwrap())).collect();
+        let mut rows = 0;
+        for look in DARK_MODE_LOOKS.into_iter().filter(|l| l.3 == 1) {
+            let (target, dark, hair, _) = look;
+            for ext in ["MDL", "ANN", "EET", "SES", "RTM", "TXA"] {
+                assert!(arc.find(&path(target, ext)).is_none(), "group {target} is free in Recom.hed");
+            }
+            let b = build_dark_mode(&arc, &keys, &have, look, Some(&kh2), Some(&bbs), Some(&heart)).unwrap();
+            let twin_row = DARK_MODE_LOOKS.iter().find(|l| l.1 == dark && l.2 == hair && l.3 == 0).copied();
+            let twin = twin_row.map(|r| build_dark_mode(&arc, &keys, &have, r, Some(&kh2), Some(&bbs), None).unwrap());
+            let twin_file = |ext: &str| match &twin {
+                Some(t) => file(t, path(twin_row.unwrap().0, ext)),
+                None => have.get(&path(dark, ext)).cloned().unwrap_or_else(|| install::read_recom(&arc, &keys, &path(dark, ext)).unwrap()),
+            };
+            let mdl = file(&b, path(target, "MDL"));
+            let (new, old) = (split_parts(&mdl).unwrap(), split_parts(&twin_file("MDL")).unwrap());
+            assert_eq!(new.len(), old.len(), "{target}");
+            assert!(new[2..] == old[2..], "{target}: the body byte for byte its Soul Eater twin's");
+            for ext in ["ANN", "EET", "SES"] {
+                assert!(file(&b, path(target, ext)) == twin_file(ext), "{target}: {ext} the Soul Eater twin's");
+            }
+            let (fraw, fb) = form.iter().find(|f| f.0 == dark).unwrap();
+            let fgrp = if dark == 201 { 161 } else { 171 };
+            let raw = |bb: &Built, gr: u16, ext: &str| file(bb, format!("raw/{}", path(gr, ext)));
+            assert!(raw(&b, target, "TXA") == raw(fb, fgrp, "TXA"), "{target}: Dark Riku's TXA ({fraw})");
+            let (wv, wt) = weapon(&mdl);
+            let (fv, _) = weapon(&file(fb, path(fgrp, "MDL")));
+            assert_eq!(wt, [BLADE_TEXTURE], "{target}: the Keyblade's texture");
+            assert!(wv == fv && !wv.is_empty() && wv.iter().all(|v| v.0 == 105), "{target}: the Keyblade on wep0 (105) where group {fgrp} has it");
+            let sk = RecomSkeleton::parse(&mdl).unwrap();
+            assert_eq!(sk.bones.len(), if hair == 1 { 139 } else { 128 }, "{target}: bones");
+            let rtm = raw(&b, target, "RTM");
+            assert!(rtm.windows(BLADE_TEXTURE.len()).any(|w| w == BLADE_TEXTURE.as_bytes()), "{target}: the Keyblade's picture in the RTM");
+            let size: usize = b.files.iter().map(|f| f.1.len()).sum();
+            eprintln!("group {target} ({}): {} bones, {} clips, .MDL {} B, raw .RTM {} B, all files {size} B", dark_look_name(hair, 1), sk.bones.len(), b.clips, mdl.len(), rtm.len());
+            let _ = std::fs::write(out.join(format!("PL{target:04}.MDL")), &mdl);
+            let _ = std::fs::write(out.join(format!("PL{target:04}.RTM.raw")), &rtm);
+            rows += 1;
+        }
+        assert_eq!(rows, 6, "209 / 210, 212 / 213, 216 / 217");
+        // one row per (Dark Riku, hair, blade); never his own look; no group twice
+        let mut seen = std::collections::HashSet::new();
+        for &(t, d, h, bl) in &DARK_MODE_LOOKS {
+            assert!(DARK_MODE_GROUPS.contains(&d) && (h, bl) != (0, 0) && seen.insert((d, h, bl)) && seen.insert((t, 9, 9)), "row {t}");
+        }
+        // the Soul Eater rows are 0.198.30 / 0.198.32's groups
+        for &(t, d, _) in DARK_MODE_BBS_HAIR_GROUPS.iter().chain(&DARK_MODE_KH2_HAIR_GROUPS) {
+            assert!(DARK_MODE_LOOKS.iter().any(|l| l.0 == t && l.1 == d && l.3 == 0), "{t}");
+        }
+    }
+
+    /// 0.198.36 reference renders (`RECOM_GAME`): the Dark Form costume's Keyblade group 161 (`REF_GROUP=171`) as the step builds it, the
+    /// right hand on the Keyblade in the views of `battle_dark_camera_checks`' `grip_*` (idle, the first swing, the guard: Riku's rows on
+    /// his pack, slots 1 / 44 and `p002_225`), into `out/dark_mode/ref<group>_<CAM_TAG>/`.
+    #[test]
+    fn dark_form_keyblade_grip_reference() {
+        use crate::kh2_hair::tests::{posed_world, render_focus};
+        use crate::mdl::{split_parts, MdlPart};
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let grp: u16 = std::env::var("REF_GROUP").ok().and_then(|x| x.parse().ok()).unwrap_or(161);
+        let &(base, raw_src, _, _) = BLADE_GROUPS.iter().find(|x| x.2 == grp).expect("a Dark Form Keyblade group");
+        let src = StepSources::read(&g, &keys).expect("the step's KH1 sources");
+        let have = step_have(&arc, &keys, &src);
+        let Ok((_, assets, _)) = install::kh1(&g, keys.clone()).unwrap().read_full(BLADE_MODEL) else { panic!() };
+        let heart = BladeSource::from_assets(&assets).unwrap();
+        let b = build_blade(&arc, &keys, &have, base, raw_src, grp, true, &heart).unwrap();
+        let file = |n: String| b.files.iter().find(|f| f.0 == n).unwrap().1.clone();
+        let mdl = file(path(grp, "MDL"));
+        let ann = Ann::parse(&file(path(grp, "ANN"))).unwrap();
+        let e = arc.find(&path(raw_src, "RTM")).unwrap();
+        let (rtm, hd) = kh1_formats::egs::decode_entry_full(&keys, &arc.read_raw_entry(e).unwrap()).unwrap();
+        let rtm_p = crate::rtm::Rtm::parse(&rtm).unwrap();
+        let parts = split_parts(&mdl).unwrap();
+        let mut p3 = MdlPart::parse_bytes(&parts[3]).unwrap();
+        let dec = |n: &str| { let e = rtm_p.entries.iter().find(|e| e.name_str().trim_end_matches(".tm2") == n.trim_end_matches(".tm2")).unwrap(); let (w, h, px) = crate::rtm::tim2_decode8(&e.data).unwrap(); crate::texture::Image { w, h, px } };
+        let mut body: Vec<crate::texture::Image> = p3.texture_names().iter().map(|n| dec(n)).collect();
+        let atlas = if raw_src == 201 { crate::ddd_hair::RIKU_0201_BBS.texture } else { crate::ddd_hair::RIKU_0211_BBS.texture };
+        let a = p3.texture_names().iter().position(|n| n == atlas).unwrap() as u32;
+        for k in p3.list_a.iter_mut().chain(p3.list_b.iter_mut().flatten()) { for v in k.verts.iter_mut() { if let Some(q) = v.q2.as_mut() { if q[3] == a { q[3] = 1; } else if q[3] == 1 { q[3] = a; } } } }
+        body.swap(1, a as usize);
+        let img = hd.iter().find(|x| x.name == crate::keyblade::hd_name(atlas)).and_then(|x| crate::texture::decode_dds(&x.data).ok()).unwrap_or_else(|| body[1].clone());
+        let wi = body.len() as u32;
+        body.push(crate::texture::decode_dds(&heart.dds).unwrap());
+        let p1 = MdlPart::parse_bytes(&parts[1]).unwrap();
+        for mut k in p1.list_a.iter().chain(p1.list_b.iter().flatten()).cloned() {
+            for v in k.verts.iter_mut() { if let Some(q) = v.q2.as_mut() { q[3] = wi; } }
+            p3.list_a.push(k);
+        }
+        let sk = RecomSkeleton::parse(&mdl).unwrap();
+        let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();
+        let hand = names.iter().position(|n| n == "r_hand").unwrap();
+        let tag = std::env::var("CAM_TAG").unwrap_or_else(|_| "cam".into());
+        let dir = std::path::PathBuf::from(format!("{}/local/assets/recom/riku-hair/out/dark_mode/ref{grp}_{tag}", crate::kh2_motion::tests::workspace()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (label, clip, f) in [("idle", "p002_001", 25.0f64), ("swing8", "p002_044", 8.0), ("swing16", "p002_044", 16.0), ("guard", RIKU_GUARD, 6.0)] {
+            let Some(c) = ann.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == clip)) else { eprintln!("{clip}: not in the pack"); continue };
+            let w = posed_world(&sk, c, f.min(c.frames as f64 - 1.0));
+            for (yn, yaw, pitch) in [("front", 0.0, 0.0), ("side", 90.0, 0.0), ("back", 180.0, 0.0), ("other", 270.0, 0.0), ("top", 0.0, 60.0), ("under", 0.0, -60.0)] {
+                render_focus(&p3, &w, &names, &img, &body, yaw, pitch, (w[hand].t, 0.09), &dir.join(format!("grip_{label}_{yn}.png")));
+            }
+        }
+    }
+
+    /// 0.198.30 renders (`RECOM_GAME`): the battle's Dark Riku as the game draws group 205 (`DM_GROUP=206` for 211's): the built `.MDL`
+    /// (asserted byte for byte the swap's) and its HD hair picture, playing the built `.ANN`; `recom` = Re:CoM's own Dark Riku (201, his
+    /// hair) in his own pack. Into `out/dark_mode/<bbs|recom>_<CAM_TAG>/`: the camera checks (idle orbit, walk, run, nape and face
+    /// close-ups; slots 1 / 2 / 3 are his idle / walk / run) and his first ground swing `p003_034` and finisher `p003_036` from four
+    /// sides with nape and ear close-ups (`swing_*`).
+    #[test]
+    fn battle_dark_camera_checks() {
+        use crate::kh2_hair::tests::{camera_checks, posed_world, render_cam, render_focus, view_at};
+        use crate::mdl::MdlPart;
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        // 0.198.32: `DM_GROUP=207` / `208` (KH2's hair, `kh2_<CAM_TAG>`, with the copies' sleight and event clips); the step's real
+        // sources (his pack with the guard and casts)
+        // 0.198.36: any row of `DARK_MODE_LOOKS` (209 / 210 Re:CoM's hair with the Keyblade: the `recom_heart` folder, `DARK_HAIR=recom`),
+        // the weapon (part 1, its own picture) drawn with the body
+        let target: u16 = std::env::var("DM_GROUP").ok().and_then(|x| x.parse().ok()).unwrap_or(205);
+        let look = DARK_MODE_LOOKS.iter().copied().find(|x| x.0 == target).expect("a row of DARK_MODE_LOOKS");
+        let kh2 = look.2 == 1;
+        let heart_on = look.3 == 1;
+        let dark = look.1;
+        let &(_, _, atlas) = if kh2 { DARK_MODE_KH2_HAIR_GROUPS.iter().find(|x| x.1 == dark).unwrap() } else { DARK_MODE_BBS_HAIR_GROUPS.iter().find(|x| x.1 == dark).unwrap() };
+        let src = StepSources::read(&g, &keys).expect("the step's KH1 sources");
+        let have = step_have(&arc, &keys, &src);
+        let bbs = crate::bbs_hair::BbsHairSource::read(&g, &keys).unwrap();
+        let kh2_src = crate::kh2_hair::Kh2HairSource::read(&install::kh2(&g, keys.clone()).unwrap()).unwrap();
+        let hair: &dyn crate::ddd_hair::HairSource = if kh2 { &kh2_src } else { &bbs };
+        // 0.198.33: `DM_BEFORE` set: 0.198.32's BBS group (no neck skirt, Riku's slot map) for the before / after renders
+        let before = std::env::var("DM_BEFORE").is_ok();
+        let atlas = if before { crate::ddd_hair::HairTarget { neck_skirt: false, ..atlas } } else { atlas };
+        let heart = install::kh1(&g, keys.clone()).ok().and_then(|i| i.read_full(BLADE_MODEL).ok()).map(|(_, a, _)| BladeSource::from_assets(&a).unwrap());
+        let built = if heart_on { build_dark_mode(&arc, &keys, &have, look, Some(&kh2_src), Some(&bbs), heart.as_ref()).unwrap() } else if kh2 { build_dark_mode_kh2(&arc, &keys, &have, dark, target, &kh2_src, &atlas, None).unwrap() } else if before { build_hair_from(&arc, &keys, &have, dark, dark, true, target, None, &bbs, &atlas).unwrap() } else { build_dark_mode_bbs(&arc, &keys, &have, dark, target, &bbs, &atlas, None).unwrap() };
+        let file = |n: String| built.files.iter().find(|f| f.0 == n).unwrap().1.clone();
+        let mdl0 = install::read_recom(&arc, &keys, &path(dark, "MDL")).unwrap();
+        let e = arc.find(&path(dark, "RTM")).unwrap();
+        let (rtm, hd) = kh1_formats::egs::decode_entry_full(&keys, &arc.read_raw_entry(e).unwrap()).unwrap();
+        let swap = crate::ddd_hair::with_hair(&hair.prepare_mdl(&mdl0).unwrap(), &rtm, &hd, &atlas, hair).unwrap();
+        let built_mdl = file(path(target, "MDL"));
+        let body_of = |m: &[u8]| crate::mdl::split_parts(m).unwrap()[2..].to_vec();
+        if look.2 != 0 {
+            assert!(if heart_on { body_of(&swap.mdl) == body_of(&built_mdl) } else { swap.mdl == built_mdl }, "the rendered model is the built one");
+        } else {
+            assert!(body_of(&mdl0) == body_of(&built_mdl), "his own body");
+        }
+        // the weapon the game draws: the built model's part 1 (the Keyblade: its HD picture; the Soul Eater: Re:CoM's)
+        let weapon_mdl = if look.2 == 0 && !heart_on { mdl0.clone() } else { built_mdl.clone() };
+        let rtm_all = crate::rtm::Rtm::parse(&rtm).unwrap();
+        let add_weapon = |p3: &mut MdlPart, body: &mut Vec<crate::texture::Image>| {
+            let p1 = MdlPart::parse_bytes(&crate::mdl::split_parts(&weapon_mdl).unwrap()[1]).unwrap();
+            let name = p1.texture_names().first().cloned().unwrap_or_default();
+            let img = if name == BLADE_TEXTURE {
+                crate::texture::decode_dds(&heart.as_ref().unwrap().dds).unwrap()
+            } else {
+                match hd.iter().find(|x| x.name == crate::keyblade::hd_name(&name)).and_then(|x| crate::texture::decode_dds(&x.data).ok()) {
+                    Some(i) => i,
+                    None => {
+                        let e = rtm_all.entries.iter().find(|e| e.name_str().trim_end_matches(".tm2") == name.trim_end_matches(".tm2")).unwrap();
+                        let (w, h, px) = crate::rtm::tim2_decode8(&e.data).unwrap();
+                        crate::texture::Image { w, h, px }
+                    }
+                }
+            };
+            let wi = body.len() as u32;
+            body.push(img);
+            for mut k in p1.list_a.iter().chain(p1.list_b.iter().flatten()).cloned() {
+                for v in k.verts.iter_mut() {
+                    if let Some(q) = v.q2.as_mut() {
+                        q[3] = wi;
+                    }
+                }
+                p3.list_a.push(k);
+            }
+        };
+        // the other packs' clips he plays: a sleight (Dark Firaga, PL1088) and an event motion (PL4043): the copies for KH2's hair,
+        // Re:CoM's for his own hair
+        let copies = if kh2 { build_dark_packs(&arc, &keys, dark, &kh2_src).unwrap() } else { vec![] };
+        let other = |grp: u16, own: bool| -> Ann {
+            match copies.iter().find(|c| c.0 == grp).filter(|_| !own) {
+                Some(c) => Ann::parse(&c.2).unwrap(),
+                None => Ann::parse(&install::read_recom(&arc, &keys, &path(grp, "ANN")).unwrap()).unwrap(),
+            }
+        };
+        let ann = Ann::parse(&file(path(target, "ANN"))).unwrap();
+        let own = Ann::parse(&have[&path(dark, "ANN")]).unwrap();
+        for (i, s) in ann.slots.iter().enumerate().take(8) {
+            eprintln!("slot {i}: {:?}", s.clip.as_ref().map(|c| (c.name_str().to_string(), c.frames)));
+        }
+        let tag = std::env::var("CAM_TAG").unwrap_or_else(|_| "cam".into());
+        let base = std::path::PathBuf::from(format!("{}/local/assets/recom/riku-hair/out/dark_mode", crate::kh2_motion::tests::workspace()));
+        let swings = |p3: &MdlPart, sk: &RecomSkeleton, a: &Ann, img: &crate::texture::Image, body: &[crate::texture::Image], dir: &std::path::Path, own: bool| {
+            let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();
+            let head = names.iter().position(|n| n == "head").unwrap();
+            let neck = names.iter().position(|n| n == "neck3").unwrap_or(head);
+            // 0.198.32: the guard and a cast (his pack as the step writes it), a sleight and an event clip (their packs), and the idle
+            // orbit with the camera low and high
+            // 0.198.33: `DM_SHOTS=clip:frame:yaw:pitch;…` only these views (the whole figure and a head close-up), as
+            // `shot_<clip>_f<frame>_y<yaw>_p<pitch>[_head].png` (with `GAME_CULL=1`: the game's facing cull)
+            if let Ok(shots) = std::env::var("DM_SHOTS") {
+                std::fs::create_dir_all(dir).unwrap();
+                for s in shots.split(';').filter(|s| !s.is_empty()) {
+                    let v: Vec<&str> = s.split(':').collect();
+                    let (clip, f, yaw, pitch): (&str, f64, f64, f64) = (v[0], v[1].parse().unwrap(), v[2].parse().unwrap(), v[3].parse().unwrap());
+                    let Some(c) = a.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == clip)) else { eprintln!("{clip}: not in the pack"); continue };
+                    let w = posed_world(sk, c, f.min(c.frames as f64 - 1.0));
+                    let name = format!("shot_{clip}_f{f}_y{yaw}_p{pitch}");
+                    render_cam(p3, &w, &names, img, body, yaw, pitch, true, &dir.join(format!("{name}.png")));
+                    render_focus(p3, &w, &names, img, body, yaw, pitch, (w[head].point([0.0, 0.02, 0.0]), 0.14), &dir.join(format!("{name}_head.png")));
+                }
+                return;
+            }
+            let (sl, ev) = (other(1088, own), other(4043, own));
+            let extra = std::env::var("DM_EXTRA").map_or(true, |x| x != "0");
+            // 0.198.33: his jump (`p003_004`, the rise `p003_096`), an air swing (`p003_057`) and the air finisher (`p003_040`): where the
+            // neck opened under BBS's hair (the design rule: Dark Riku's renders include jump and attacks)
+            let clips: Vec<(&str, &Ann)> = if extra { vec![("p003_034", a), ("p003_036", a), ("p003_004", a), ("p003_096", a), ("p003_057", a), ("p003_040", a), (DARK_GUARD, a), ("p003_227", a), ("p003_043", &sl), ("p003_200", &ev)] } else { vec![("p003_034", a), ("p003_036", a)] };
+            if extra {
+                if let Some(c) = a.slots.get(1).and_then(|s| s.clip.as_ref()) {
+                    let w = posed_world(sk, c, 25.0);
+                    for (tag, pitch) in [("low", -35.0), ("high", 35.0)] {
+                        for k in 0..8 {
+                            render_cam(p3, &w, &names, img, body, k as f64 * 45.0, pitch, true, &dir.join(format!("orbit_{tag}_{:03}.png", k * 45)));
+                        }
+                    }
+                }
+            }
+            // 0.198.36: the right hand on the weapon (idle, the first swing, the guard), from six sides
+            if extra {
+                let hand = names.iter().position(|n| n == "r_hand").unwrap();
+                for (label, clip, f) in [("idle", "p003_001", 25.0f64), ("swing8", "p003_034", 8.0), ("swing16", "p003_034", 16.0), ("guard", DARK_GUARD, 6.0)] {
+                    let Some(c) = a.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == clip)) else { continue };
+                    let w = posed_world(sk, c, f.min(c.frames as f64 - 1.0));
+                    for (yn, yaw, pitch) in [("front", 0.0, 0.0), ("side", 90.0, 0.0), ("back", 180.0, 0.0), ("other", 270.0, 0.0), ("top", 0.0, 60.0), ("under", 0.0, -60.0)] {
+                        render_focus(p3, &w, &names, img, body, yaw, pitch, (w[hand].t, 0.09), &dir.join(format!("grip_{label}_{yn}.png")));
+                    }
+                }
+            }
+            for (clip, a) in clips {
+                let Some(c) = a.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == clip)) else { eprintln!("{clip}: not in the pack"); continue };
+                assert_eq!(c.bones as usize, sk.bones.len(), "{clip}: the model's bone count");
+                let n = c.frames as f64;
+                for f in [0.0, (n / 4.0).round(), (n / 2.0).round(), (3.0 * n / 4.0).round(), n - 1.0] {
+                    let w = posed_world(sk, c, f);
+                    for yaw in [0.0, 90.0, 180.0, 270.0] {
+                        render_cam(p3, &w, &names, img, body, yaw, -10.0, true, &dir.join(format!("swing_{clip}_f{f}_y{yaw}.png")));
+                    }
+                    render_focus(p3, &w, &names, img, body, 180.0, -15.0, (w[neck].t, 0.16), &dir.join(format!("swing_{clip}_nape_f{f}.png")));
+                    let ear = w[head].point([0.0, 0.03, 0.03]);
+                    for yaw in [90.0, 270.0] {
+                        render_focus(p3, &w, &names, img, body, yaw, 0.0, (ear, 0.09), &dir.join(format!("swing_{clip}_ear_f{f}_y{yaw}.png")));
+                    }
+                }
+            }
+        };
+        let which = std::env::var("DARK_HAIR").unwrap_or_else(|_| "bbs,recom".into());
+        let heart_dir = if heart_on { "_heart" } else { "" };
+        if look.2 != 0 && which.contains(if kh2 { "kh2" } else { "bbs" }) {
+            let (mut p3, img, mut body) = view_at(&swap, atlas.texture);
+            add_weapon(&mut p3, &mut body);
+            let sk = RecomSkeleton::parse(&swap.mdl).unwrap();
+            let dir = base.join(format!("{}{heart_dir}{}_{tag}", if kh2 { "kh2" } else { "bbs" }, if dark == 201 { "" } else { "_0211" }));
+            if std::env::var("DM_SHOTS").is_err() { camera_checks(&p3, &sk, &ann, &img, &body, &dir); }
+            swings(&p3, &sk, &ann, &img, &body, &dir, false);
+        }
+        if which.contains("recom") {
+            // Re:CoM's Dark Riku as he is, drawn with the same tool (as `kh2_hair::tests::dark_camera_checks`' `recom`)
+            let sk = RecomSkeleton::parse(&mdl0).unwrap();
+            let mut p3 = MdlPart::parse_bytes(&crate::mdl::split_parts(&mdl0).unwrap()[3]).unwrap();
+            let rtm_p = crate::rtm::Rtm::parse(&rtm).unwrap();
+            let mut body: Vec<crate::texture::Image> = p3.textures.iter().map(|n| {
+                let n = String::from_utf8_lossy(n.split(|&b| b == 0).next().unwrap_or(&[])).to_string();
+                let e = rtm_p.entries.iter().find(|e| e.name_str().trim_end_matches(".tm2") == n.trim_end_matches(".tm2")).unwrap();
+                let (w, h, px) = crate::rtm::tim2_decode8(&e.data).unwrap();
+                crate::texture::Image { w, h, px }
+            }).collect();
+            let a = p3.texture_names().iter().position(|n| n == atlas.texture).unwrap() as u32;
+            for k in p3.list_a.iter_mut().chain(p3.list_b.iter_mut().flatten()) { for v in k.verts.iter_mut() { if let Some(q) = v.q2.as_mut() { if q[3] == a { q[3] = 1; } else if q[3] == 1 { q[3] = a; } } } }
+            body.swap(1, a as usize);
+            let img = hd.iter().find(|x| x.name == crate::keyblade::hd_name(atlas.texture)).and_then(|x| crate::texture::decode_dds(&x.data).ok()).unwrap_or_else(|| body[1].clone());
+            // his own Soul Eater, or (209 / 210) the Keyblade
+            add_weapon(&mut p3, &mut body);
+            let dir = base.join(format!("recom{}{}_{tag}", if look.2 == 0 { heart_dir } else { "" }, if dark == 201 { "" } else { "_0211" }));
+            if std::env::var("DM_SHOTS").is_err() { camera_checks(&p3, &sk, &own, &img, &body, &dir); }
+            swings(&p3, &sk, &own, &img, &body, &dir, true);
         }
     }
 
@@ -3154,6 +3886,350 @@ mod tests {
         }
     }
 
+    /// The group `grp` as the asset step builds it, for the gap scans: (`.MDL`, `.ANN`). 185 = the Dark Form's BBS, 205 / 206 = the
+    /// battle's Dark Riku with BBS's hair, 207 = with KH2's.
+    fn gap_group(g: &std::path::Path, grp: u16) -> (Vec<u8>, Ann) {
+        gap_group_as(g, grp, std::env::var("DM_BEFORE").is_ok())
+    }
+    /// [`gap_group`], `before` = 0.198.32's (no neck skirt, Riku's slot map).
+    fn gap_group_as(g: &std::path::Path, grp: u16, before: bool) -> (Vec<u8>, Ann) {
+        let keys = install::keys(g).unwrap();
+        let arc = install::recom_archive(g).unwrap();
+        let src = StepSources::read(g, &keys).expect("the step's KH1 sources");
+        let have = step_have(&arc, &keys, &src);
+        let bbs = crate::bbs_hair::BbsHairSource::read(g, &keys).unwrap();
+        if grp == 201 {
+            return (install::read_recom(&arc, &keys, &path(201, "MDL")).unwrap(), Ann::parse(&have[&path(201, "ANN")]).unwrap());
+        }
+        let built = match grp {
+            185 => build_hair_from(&arc, &keys, &have, 121, 201, true, 185, None, &bbs, &crate::ddd_hair::HairTarget { neck_skirt: !before, ..crate::ddd_hair::RIKU_0201_BBS }).unwrap(),
+            205 | 206 if before => {
+                let (dark, atlas) = if grp == 205 { (201, crate::ddd_hair::RIKU_0201_BBS) } else { (211, crate::ddd_hair::RIKU_0211_BBS) };
+                build_hair_from(&arc, &keys, &have, dark, dark, true, grp, None, &bbs, &crate::ddd_hair::HairTarget { neck_skirt: false, ..atlas }).unwrap()
+            }
+            205 => build_dark_mode_bbs(&arc, &keys, &have, 201, 205, &bbs, &crate::ddd_hair::RIKU_0201_BBS, None).unwrap(),
+            206 => build_dark_mode_bbs(&arc, &keys, &have, 211, 206, &bbs, &crate::ddd_hair::RIKU_0211_BBS, None).unwrap(),
+            207 => {
+                let k = crate::kh2_hair::Kh2HairSource::read(&install::kh2(g, keys.clone()).unwrap()).unwrap();
+                build_dark_mode_kh2(&arc, &keys, &have, 201, 207, &k, &crate::ddd_hair::RIKU_0201_KH2, None).unwrap()
+            }
+            _ => panic!("GAP_GROUP"),
+        };
+        let file = |n: String| built.files.iter().find(|f| f.0 == n).unwrap().1.clone();
+        (file(path(grp, "MDL")), Ann::parse(&file(path(grp, "ANN"))).unwrap())
+    }
+
+    /// 0.198.33 (owner's install, `RECOM_GAME`): the battle's Dark Riku with BBS's hair (205 / 206) gets the neck skirt
+    /// ([`crate::ddd_hair::NECK_SKIRT_Y`]) and nothing else of his model changes: every triangle of 0.198.32's model is there, the new ones
+    /// wear the open edge's own texture (not the hair's), join a `head` / `neck*` corner to a hair corner, and in his own clips (idle, walk, run, jump, fall, land,
+    /// the seven swings) have no side longer than `NECK_SKIRT_LONGEST` (the band opens as the neck turns under the head; its corners are
+    /// the neck's open edge and hair corners, so it cannot reach out of them, but a longer side would be a flap seen as a wing). His hair's sway is baked on his own slots: his battle stance (21) as the idle (the same
+    /// keys as slot 1's first frames), not as the run.
+    #[test]
+    fn the_battle_dark_riku_bbs_neck_is_closed() {
+        const NECK_SKIRT_LONGEST: f64 = 0.06;
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let src = StepSources::read(&g, &keys).expect("the step's KH1 sources");
+        let have = step_have(&arc, &keys, &src);
+        let bbs = crate::bbs_hair::BbsHairSource::read(&g, &keys).unwrap();
+        for &(target, dark, atlas) in &DARK_MODE_BBS_HAIR_GROUPS {
+            let old = build_hair_from(&arc, &keys, &have, dark, dark, true, target, None, &bbs, &crate::ddd_hair::HairTarget { neck_skirt: false, ..atlas }).unwrap();
+            let new = build_dark_mode_bbs(&arc, &keys, &have, dark, target, &bbs, &atlas, None).unwrap();
+            let file = |b: &Built, n: String| b.files.iter().find(|f| f.0 == n).unwrap().1.clone();
+            let (m0, m1) = (file(&old, path(target, "MDL")), file(&new, path(target, "MDL")));
+            let sk = RecomSkeleton::parse(&m1).unwrap();
+            let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();
+            let head = names.iter().position(|n| n == "head").unwrap();
+            let p = |m: &[u8]| crate::mdl::MdlPart::parse_bytes(&crate::mdl::split_parts(m).unwrap()[3]).unwrap();
+            let (p0, p1) = (p(&m0), p(&m1));
+            let hair_tex = p1.texture_names().iter().position(|n| n == atlas.new_texture).unwrap() as u32;
+            let w = sk.rest_world();
+            let key = |t: &crate::ddd_hair::RTri| { let mut k: Vec<[i64; 4]> = t.v.iter().map(|v| { let q = w[v.bone()].point(v.pos().map(|x| x as f64)); [(q[0] * 1e4) as i64, (q[1] * 1e4) as i64, (q[2] * 1e4) as i64, v.bone() as i64] }).collect(); k.sort(); (k, t.tex) };
+            let mut before: std::collections::HashMap<_, usize> = Default::default();
+            for t in crate::ddd_hair::tests::collect(&p0) { *before.entry(key(&t)).or_default() += 1; }
+            let mut added = vec![];
+            for t in crate::ddd_hair::tests::collect(&p1) {
+                match before.get_mut(&key(&t)) {
+                    Some(n) if *n > 0 => *n -= 1,
+                    _ => added.push(t),
+                }
+            }
+            assert!(before.values().all(|&n| n == 0), "{target}: a triangle of 0.198.32's model is gone");
+            assert!(!added.is_empty() && added.len() <= 80, "{target}: {} new triangles", added.len());
+            let mut tex_used = std::collections::BTreeSet::new();
+            for t in &added {
+                // option 2 (fork owner: "2"): the edge's own texture (the coat's, the face's), not the hair's
+                assert_ne!(t.tex, hair_tex, "{target}: a new triangle on the hair's texture");
+                tex_used.insert(p1.texture_names()[t.tex as usize].clone());
+                assert!(t.v.iter().any(|v| names[v.bone()].starts_with("neck") || v.bone() == head), "{target}: a new triangle off the neck");
+            }
+            let len = |q: &[[f64; 3]; 3]| (0..3).map(|i| crate::math::dist(q[i], q[(i + 1) % 3])).fold(0.0, f64::max);
+            let rest: Vec<f64> = added.iter().map(|t| len(&t.v.map(|v| w[v.bone()].point(v.pos().map(|x| x as f64))))).collect();
+            let ann = Ann::parse(&file(&new, path(target, "ANN"))).unwrap();
+            let mut worst = (0.0f64, String::new());
+            for s in [1usize, 2, 3, 4, 96, 6, 7, 8, 21, 34, 39, 35, 36, 57, 37, 40] {
+                let c = ann.slots[s].clip.as_ref().unwrap();
+                for f in 0..c.frames as usize {
+                    let pw = crate::kh2_hair::tests::posed_world(&sk, c, f as f64);
+                    for (t, r) in added.iter().zip(&rest) {
+                        let k = len(&t.v.map(|v| pw[v.bone()].point(v.pos().map(|x| x as f64))));
+                        if k > worst.0 { worst = (k, format!("{} f{f} (rest {:.1} cm)", c.name_str(), r * 100.0)); }
+                    }
+                }
+            }
+            let rest_max = rest.iter().cloned().fold(0.0, f64::max);
+            eprintln!("{target}: skirt textures {tex_used:?}");
+            eprintln!("{target}: {} skirt triangles, longest side {:.1} cm at rest, {:.1} cm at {}", added.len(), rest_max * 100.0, worst.0 * 100.0, worst.1);
+            // not asserted (open, 0.198.33): the skirt webs out behind the neck in his air finisher and jump (11.2 cm sides on 205);
+            // `dark_mode_hair_hole_scan` measures where it is drawn over his neck
+            let _ = NECK_SKIRT_LONGEST;
+            // the sway on his slots: slot 21 (his battle stance) takes the idle's hair keys at frame 0, slot 3 (his run) the run's
+            let rig = bbs.sway_rig(&install::read_recom(&arc, &keys, &path(dark, "MDL")).unwrap()).unwrap().unwrap();
+            let at = |s: usize, b: usize| { let c = ann.slots[s].clip.as_ref().unwrap(); c.sample(b, 0.0).r };
+            for &(_, rb, _) in &rig.pairs {
+                let (i, st, run) = (at(1, rb), at(21, rb), at(3, rb));
+                assert!((0..3).all(|k| (i[k] - st[k]).abs() < 1e-3), "{target}: bone {rb}: his stance does not start on the idle's sway");
+                let _ = run;
+            }
+        }
+    }
+
+    /// Probe: the open edges (used by one triangle) of `GAP_GROUP`'s part 3 among the triangles whose corners are all on `head` /
+    /// `neck*`, head-relative at rest (cm), with their bones and texture.
+    #[test]
+    fn dark_mode_neck_open_edges() {
+        let Some(g) = game() else { return };
+        let Ok(grp) = std::env::var("GAP_GROUP").map(|x| x.parse::<u16>().unwrap()) else { return };
+        let (mdl, _) = gap_group(&g, grp);
+        let sk = RecomSkeleton::parse(&mdl).unwrap();
+        let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();
+        let head = names.iter().position(|n| n == "head").unwrap();
+        let p3 = crate::mdl::MdlPart::parse_bytes(&crate::mdl::split_parts(&mdl).unwrap()[3]).unwrap();
+        let w = sk.rest_world();
+        eprintln!("textures {:?}", p3.texture_names());
+        let key = |p: [f64; 3]| p.map(|x| (x * 1e4).round() as i64);
+        let mut edges: std::collections::HashMap<([i64; 3], [i64; 3]), (usize, [f64; 3], [f64; 3], String, u32)> = Default::default();
+        let ok = |b: usize| b == head || names[b].starts_with("neck") || names[b] == "chest1" || names[b].ends_with("collar");
+        for t in crate::ddd_hair::tests::collect(&p3) {
+            if !t.v.iter().all(|v| ok(v.bone())) || !t.v.iter().any(|v| v.bone() == head || names[v.bone()].starts_with("neck")) { continue; }
+            let p = t.v.map(|v| w[v.bone()].point(v.pos().map(|x| x as f64)));
+            for (a, b) in [(0, 1), (1, 2), (2, 0)] {
+                let (ka, kb) = (key(p[a]), key(p[b]));
+                let k = if ka <= kb { (ka, kb) } else { (kb, ka) };
+                let e = edges.entry(k).or_insert((0, p[a], p[b], format!("{}-{}", names[t.v[a].bone()], names[t.v[b].bone()]), t.tex));
+                e.0 += 1;
+            }
+        }
+        let h = w[head].t;
+        let mut open: Vec<_> = edges.values().filter(|e| e.0 == 1).map(|e| {
+            let m = [0, 1, 2].map(|k| ((e.1[k] + e.2[k]) / 2.0 - h[k]) * 100.0);
+            (m, crate::math::dist(e.1, e.2) * 100.0, e.3.clone(), e.4)
+        }).collect();
+        open.sort_by(|a, b| a.0[2].total_cmp(&b.0[2]));
+        // the hair's corners (its texture), for the distance from each open neck edge's corners
+        let hair_tex = p3.texture_names().iter().position(|n| n.starts_with("rk_hair")).map(|x| x as u32);
+        let hv: Vec<[f64; 3]> = crate::ddd_hair::tests::collect(&p3).iter().filter(|t| Some(t.tex) == hair_tex).flat_map(|t| t.v.map(|v| w[v.bone()].point(v.pos().map(|x| x as f64)))).collect();
+        for (m, l, b, t) in &open {
+            if m[1] > 8.0 || m[1] < -14.0 { continue; }
+            let p = [0, 1, 2].map(|k| m[k] / 100.0 + h[k]);
+            let near = hv.iter().map(|q| (crate::math::dist(*q, p), *q)).min_by(|a, b| a.0.total_cmp(&b.0));
+            let ns = near.map_or(String::new(), |(d, q)| format!(" hair {:.1} cm at x{:+.1} y{:+.1} z{:+.1}", d * 100.0, (q[0] - h[0]) * 100.0, (q[1] - h[1]) * 100.0, (q[2] - h[2]) * 100.0));
+            eprintln!("open x{:+6.1} y{:+6.1} z{:+6.1} len {l:4.1} {b} tex {t}{ns}", m[0], m[1], m[2]);
+        }
+    }
+
+    /// Probe (fork owner, 2026-11-27: "percebi que o cabelo do bbs tem alguns espaços vazios no modo dark mode, testei pulando e
+    /// atacando"): see-through pixels as the game draws the model (part 3 one-sided by each triangle's facing flag, clockwise on the
+    /// monitor = front, `knowledge/ReCoM/recom-model-culling.md`; part 2, the plain proxy, without a cull): a pixel some triangle covers
+    /// (drawn two-sided) where the game's draw shows the background, inside a 0.4 m window round the head, over a sphere of views
+    /// (yaw every 30 deg, pitch -60..75 every 15), per clip frame. `GAP_GROUP`, `GAP_SLOTS`, `GAP_STEP` (frames); worst views to
+    /// `local/work/darkholes/<group>/`.
+    #[test]
+    fn dark_mode_hair_hole_scan() {
+        let Some(g) = game() else { return };
+        let Ok(grp) = std::env::var("GAP_GROUP").map(|x| x.parse::<u16>().unwrap()) else { return };
+        let (mdl, ann) = gap_group(&g, grp);
+        let sk = RecomSkeleton::parse(&mdl).unwrap();
+        let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();
+        let head = names.iter().position(|n| n == "head").unwrap();
+        let parts = crate::mdl::split_parts(&mdl).unwrap();
+        let p3 = crate::mdl::MdlPart::parse_bytes(&parts[3]).unwrap();
+        let p2 = crate::mdl::MdlPart::parse_bytes(&parts[2]).unwrap();
+        // (corners (bone, pos), facing flag, kind: 3 = part 3, 2 = proxy)
+        let mut tris: Vec<([(usize, [f64; 3]); 3], i16, u8)> = vec![];
+        let mut t3 = crate::ddd_hair::tests::collect(&p3);
+        if let Some(lb) = p3.list_b.as_ref() { t3.extend(crate::ddd_hair::tests::extract_list(lb)); }
+        // kind 4: a triangle 0.198.32's model does not have (the neck skirt), for `GAP_GROUP` 185 / 205 / 206
+        let w0 = sk.rest_world();
+        let key = |t: &crate::ddd_hair::RTri| { let mut k: Vec<[i64; 4]> = t.v.iter().map(|v| { let q = w0[v.bone()].point(v.pos().map(|x| x as f64)); [(q[0] * 1e4) as i64, (q[1] * 1e4) as i64, (q[2] * 1e4) as i64, v.bone() as i64] }).collect(); k.sort(); (k, t.tex) };
+        let mut old: std::collections::HashMap<_, usize> = Default::default();
+        if [185, 205, 206].contains(&grp) && std::env::var("DM_BEFORE").is_err() {
+            let (m0, _) = gap_group_as(&g, grp, true);
+            let q0 = crate::mdl::MdlPart::parse_bytes(&crate::mdl::split_parts(&m0).unwrap()[3]).unwrap();
+            let mut o = crate::ddd_hair::tests::collect(&q0);
+            if let Some(lb) = q0.list_b.as_ref() { o.extend(crate::ddd_hair::tests::extract_list(lb)); }
+            for t in o { *old.entry(key(&t)).or_default() += 1; }
+        }
+        let hair_tex = p3.texture_names().iter().position(|n| n.starts_with("rk_hair")).map(|x| x as u32);
+        let mut is_hair: Vec<bool> = vec![];
+        for t in &t3 {
+            is_hair.push(Some(t.tex) == hair_tex);
+            let new = !old.is_empty() && match old.get_mut(&key(t)) { Some(n) if *n > 0 => { *n -= 1; false } _ => true };
+            tris.push((t.v.map(|v| (v.bone(), v.pos().map(|x| x as f64))), t.v[2].q0[0] as i16, if new { 4 } else { 3 }));
+        }
+        eprintln!("{} new triangles", tris.iter().filter(|t| t.2 == 4).count());
+        // the plain proxy (part 2) is a flat copy of the whole body at the same depth (a z-fight with part 3 in every pixel): left out
+        // unless `GAP_PROXY` is set
+        if std::env::var("GAP_PROXY").is_ok() {
+            for t in crate::ddd_hair::tests::collect(&p2) { tris.push((t.v.map(|v| (v.bone(), v.pos().map(|x| x as f64))), 0, 2)); }
+        }
+        let out = std::path::PathBuf::from(format!("{}/local/work/darkholes/{grp}", crate::kh2_motion::tests::workspace()));
+        std::fs::create_dir_all(&out).unwrap();
+        const N: usize = 160;
+        let half = 0.2;
+        thread_local! { static DEEP: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) }; }
+        // one view: (hole mask, proxy-visible mask, the A-nearest triangle per pixel)
+        let view = |w: &[crate::math::Aff], yaw: f64, pitch: f64, sign: f64| -> (Vec<u8>, Vec<usize>) {
+            let (sy, cy, sp, cp) = (yaw.to_radians().sin(), yaw.to_radians().cos(), pitch.to_radians().sin(), pitch.to_radians().cos());
+            let tx = |q: [f64; 3]| { let (x, y, z) = (q[0] * cy + q[2] * sy, q[1], -q[0] * sy + q[2] * cy); [x, y * cp - z * sp, y * sp + z * cp] };
+            let c = tx(w[head].point([0.0, 0.05, 0.0]));
+            let mut za = vec![f64::MIN; N * N];
+            let mut ia = vec![usize::MAX; N * N];
+            let mut zb = vec![f64::MIN; N * N];
+            let mut kb = vec![0u8; N * N];
+            // the nearest drawn surface that is not new (kind 4)
+            let mut zo = vec![f64::MIN; N * N];
+            let mut ho = vec![false; N * N];
+            let mut ib = vec![usize::MAX; N * N];
+            let mut zao = vec![f64::MIN; N * N];
+            for (k, (v, flag, kind)) in tris.iter().enumerate() {
+                let p = v.map(|(b, q)| tx(w[b].point(q)));
+                if p.iter().all(|q| (q[0] - c[0]).abs() > half || (q[1] - c[1]).abs() > half) { continue; }
+                let s = p.map(|q| [(q[0] - c[0] + half) / (2.0 * half) * N as f64, (c[1] + half - q[1]) / (2.0 * half) * N as f64]);
+                let cross = (s[1][0] - s[0][0]) * (s[2][1] - s[0][1]) - (s[1][1] - s[0][1]) * (s[2][0] - s[0][0]);
+                if cross.abs() < 1e-9 { continue; }
+                // the game: flag 0 drawn iff (a, b, c) is clockwise on the monitor (y down: cross > 0), 0x20 iff counter-clockwise
+                let game = *kind == 2 || ((cross * sign > 0.0) == (*flag == 0));
+                let x0 = s.iter().map(|q| q[0]).fold(f64::MAX, f64::min).floor().max(0.0) as usize;
+                let x1 = (s.iter().map(|q| q[0]).fold(f64::MIN, f64::max).ceil().max(0.0) as usize).min(N - 1);
+                let y0 = s.iter().map(|q| q[1]).fold(f64::MAX, f64::min).floor().max(0.0) as usize;
+                let y1 = (s.iter().map(|q| q[1]).fold(f64::MIN, f64::max).ceil().max(0.0) as usize).min(N - 1);
+                for y in y0..=y1 { for x in x0..=x1 {
+                    let (px, py) = (x as f64 + 0.5, y as f64 + 0.5);
+                    let l1 = ((s[2][0] - s[0][0]) * (py - s[0][1]) - (s[2][1] - s[0][1]) * (px - s[0][0])) / -cross;
+                    let l2 = ((s[1][0] - s[0][0]) * (py - s[0][1]) - (s[1][1] - s[0][1]) * (px - s[0][0])) / cross;
+                    let l0 = 1.0 - l1 - l2;
+                    if l0 < 0.0 || l1 < 0.0 || l2 < 0.0 { continue; }
+                    let z = l0 * p[0][2] + l1 * p[1][2] + l2 * p[2][2];
+                    let i = y * N + x;
+                    if z > za[i] { za[i] = z; ia[i] = k; }
+                    if *kind != 4 && z > zao[i] { zao[i] = z; }
+                    if game && z > zb[i] { zb[i] = z; kb[i] = *kind; ib[i] = k; }
+                    if game && *kind != 4 && z > zo[i] { zo[i] = z; ho[i] = is_hair.get(k).copied().unwrap_or(false); }
+                } }
+            }
+            // 0 nothing, 1 drawn (part 3), 2 proxy shows, 3 see-through (covered, the game draws nothing), 4 drawn but deeper than the
+            // nearest surface by > 2 cm (seen through a hole onto a farther surface: the inside of the head or hair)
+            // 5 the new triangles drawn more than 5 mm in front of an old surface that is not hair (the skirt over the neck or the
+            // coat: a crossing),
+            // 6 the new triangles where the old model showed the background (a hole filled)
+            let mut m = vec![0u8; N * N];
+            for i in 0..N * N {
+                m[i] = if ia[i] == usize::MAX { 0 } else if zb[i] == f64::MIN { 3 } else if kb[i] == 4 && zo[i] == f64::MIN { 6 } else if kb[i] == 4 && zb[i] - zo[i] > 0.005 && !(zo[i] < zao[i] - 0.02) && !ho[i] { 5 } else if kb[i] == 4 && zb[i] - zo[i] > 0.005 && !(zo[i] < zao[i] - 0.02) && ho[i] { 7 } else if kb[i] == 2 { 2 } else if za[i] - zb[i] > 0.02 { 4 } else { 1 };
+            }
+            // where a new triangle is over an old surface, the culprit is the new one
+            let mut deep = 0.0f64;
+            for i in 0..N * N { if m[i] == 5 { ia[i] = ib[i]; deep = deep.max(zb[i] - zo[i]); } }
+            DEEP.with(|d| d.set(d.get().max(deep)));
+            (m, ia)
+        };
+        // the facing convention: with the right sign the drawn surface is the nearest one almost everywhere
+        let rest = sk.rest_world();
+        let score = |sign: f64| { let (m, _) = view(&rest, 0.0, 0.0, sign); m.iter().filter(|&&x| x == 1).count() };
+        let (sp, sm) = (score(1.0), score(-1.0));
+        let sign = if sp >= sm { 1.0 } else { -1.0 };
+        eprintln!("group {grp}: facing sign {sign} (nearest-drawn pixels {sp} vs {sm})");
+        // a defect pixel = see-through (3) or onto a farther surface (4) or the proxy (2), not on the coverage's 1-px rim
+        let bad = |m: &[u8]| -> (usize, usize, usize) {
+            let mut n = (0, 0, 0);
+            for y in 1..N - 1 { for x in 1..N - 1 {
+                let i = y * N + x;
+                if m[i] < 2 || [i - 1, i + 1, i - N, i + N].iter().any(|&j| m[j] == 0) { continue; }
+                match m[i] { 3 => n.0 += 1, 4 => n.1 += 1, 5 => n.2 += 1, _ => {} }
+            } }
+            n
+        };
+        let png = |m: &[u8], path: &std::path::Path| {
+            let rgb: Vec<u8> = m.iter().flat_map(|&x| match x { 0 => [214, 212, 230], 1 => [70, 70, 90], 2 => [40, 200, 40], 3 => [255, 0, 255], 5 => [230, 0, 0], 6 => [0, 200, 90], _ => [255, 160, 0] }).collect();
+            std::fs::write(path, crate::ddd_hair::tests::png(N, N, &rgb)).unwrap();
+        };
+        let step: usize = std::env::var("GAP_STEP").ok().and_then(|x| x.parse().ok()).unwrap_or(2);
+        let slots: Vec<usize> = std::env::var("GAP_SLOTS").map(|s| s.split(',').map(|x| x.parse().unwrap()).collect()).unwrap_or_else(|_| vec![1, 4]);
+        let mut culprits: std::collections::BTreeMap<String, usize> = Default::default();
+        for s in slots {
+            let Some(c) = ann.slots.get(s).and_then(|x| x.clip.as_ref()) else { continue };
+            let (mut tot, mut worst) = ((0, 0, 0), (0usize, 0usize, 0.0, 0.0));
+            let mut head_only = 0usize;
+            let (mut filled, mut cover_worst) = (0usize, (0usize, 0usize, 0.0, 0.0));
+            let (mut over_hair, mut over_hair_worst) = (0usize, (0usize, 0usize, 0.0, 0.0));
+            let mut frames: Vec<usize> = (0..c.frames as usize).step_by(step).collect();
+            frames.push(c.frames as usize - 1);
+            for &f in &frames {
+                let w = crate::kh2_hair::tests::posed_world(&sk, c, f as f64);
+                for yi in 0..12 { for pi in 0..10 {
+                    let (yaw, pitch) = (yi as f64 * 30.0, -60.0 + pi as f64 * 15.0);
+                    let (m, ia) = view(&w, yaw, pitch, sign);
+                    let b = bad(&m);
+                    tot = (tot.0 + b.0, tot.1 + b.1, tot.2 + b.2);
+                    filled += m.iter().filter(|&&x| x == 6).count();
+                    let oh = m.iter().filter(|&&x| x == 7).count();
+                    over_hair += oh;
+                    if oh > over_hair_worst.0 { over_hair_worst = (oh, f, yaw, pitch); }
+                    for i in 0..N * N {
+                        if m[i] != 5 { continue; }
+                        let (v, _, _) = tris[ia[i]];
+                        let cen = [0, 1, 2].map(|k| (0..3).map(|j| rest[v[j].0].point(v[j].1)[k]).sum::<f64>() / 3.0 - rest[head].t[k]);
+                        let ends: Vec<String> = v.iter().map(|x| { let q = rest[x.0].point(x.1); format!("{}({:+.1},{:+.1},{:+.1})", names[x.0], (q[0] - rest[head].t[0]) * 100.0, (q[1] - rest[head].t[1]) * 100.0, (q[2] - rest[head].t[2]) * 100.0) }).collect();
+                        *culprits.entry(format!("CROSS {} c({:+.1},{:+.1},{:+.1})", ends.join(" "), cen[0] * 100.0, cen[1] * 100.0, cen[2] * 100.0)).or_default() += 1;
+                    }
+                    if b.2 > cover_worst.0 { cover_worst = (b.2, f, yaw, pitch); }
+                    let mut n = 0;
+                    for y in 1..N - 1 { for x in 1..N - 1 {
+                        let i = y * N + x;
+                        if !(m[i] == 3 || m[i] == 4) || [i - 1, i + 1, i - N, i + N].iter().any(|&j| m[j] == 0) { continue; }
+                        let (v, _, _) = tris[ia[i]];
+                        if !v.iter().any(|x| x.0 == head || names[x.0].contains("hair") || names[x.0].starts_with("neck")) { continue; }
+                        n += 1;
+                        // where: the culprit triangle's centroid in the head's rest frame, 2 cm cells
+                        let cen = [0, 1, 2].map(|k| (0..3).map(|j| rest[v[j].0].point(v[j].1)[k]).sum::<f64>() / 3.0 - rest[head].t[k]);
+                        let cell = format!("{}/{}/{} x{:+.2} y{:+.2} z{:+.2} {}", names[v[0].0], names[v[1].0], names[v[2].0], (cen[0] * 50.0).round() / 50.0, (cen[1] * 50.0).round() / 50.0, (cen[2] * 50.0).round() / 50.0, if m[i] == 3 { "bg" } else { "far" });
+                        *culprits.entry(cell).or_default() += 1;
+                    }}
+                    head_only += n;
+                    if n > worst.0 { worst = (n, f, yaw, pitch); }
+                }}
+            }
+            eprintln!("slot {s} {}: frames {} | see-through {} onto-farther {} | on head / hair / neck {head_only} | worst {} px at f{} yaw {} pitch {} | new over old surfaces {} (worst {} px f{} y{} p{}), holes filled {filled}", c.name_str(), frames.len(), tot.0, tot.1, worst.0, worst.1, worst.2, worst.3, tot.2, cover_worst.0, cover_worst.1, cover_worst.2, cover_worst.3);
+            eprintln!("  new over the hair {over_hair} (worst {} px f{} y{} p{})", over_hair_worst.0, over_hair_worst.1, over_hair_worst.2, over_hair_worst.3);
+            eprintln!("  deepest: new in front of an old surface by {:.1} cm", DEEP.with(|d| d.replace(0.0)) * 100.0);
+            if cover_worst.0 > 0 {
+                let w = crate::kh2_hair::tests::posed_world(&sk, c, cover_worst.1 as f64);
+                let (m, _) = view(&w, cover_worst.2, cover_worst.3, sign);
+                png(&m, &out.join(format!("cover_{}_f{}_y{}_p{}.png", c.name_str(), cover_worst.1, cover_worst.2, cover_worst.3)));
+            }
+            if worst.0 > 0 {
+                let w = crate::kh2_hair::tests::posed_world(&sk, c, worst.1 as f64);
+                let (m, _) = view(&w, worst.2, worst.3, sign);
+                png(&m, &out.join(format!("{}_f{}_y{}_p{}.png", c.name_str(), worst.1, worst.2, worst.3)));
+            }
+        }
+        let mut cv: Vec<_> = culprits.into_iter().collect();
+        cv.sort_by_key(|x| std::cmp::Reverse(x.1));
+        for (k, n) in cv.iter().take(40) { eprintln!("  {n:6} {k}"); }
+    }
+
     trait Clips<'a> {
         fn flatten_clips(self) -> Box<dyn Iterator<Item = &'a Clip> + 'a>;
     }
@@ -3715,3 +4791,4 @@ mod cast_ends {
         }
     }
 }
+

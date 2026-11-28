@@ -601,6 +601,26 @@ pub fn tilt_hair(rig: &Rig, hr: &mut [(usize, Aff)], head_rest: &[[f64; 3]; 3], 
 /// `by_slot`: the clips are `PL0101.ANN`'s, so [`CLIP_MAP`] picks KH2's motion by slot; false for other packs (0.197.4: Riku's event
 /// packs, whose slots mean other clips): every clip takes KH2's idle sway.
 pub fn bake(ann: &mut Ann, rig: &Rig, sk: &crate::mdl::RecomSkeleton, head: usize, model: &Model, motions: &HashMap<usize, Kh2Motion>, by_slot: bool) -> Result<()> {
+    let slots = if by_slot { RIKU_SLOTS } else { NO_SLOTS };
+    bake_slots(ann, rig, sk, head, model, motions, slots)
+}
+
+/// Which KH2 motion each slot of a pack takes ([`bake_slots`]): (slot, KH2 motion), and the idle slots whose loop is unrolled.
+#[derive(Clone, Copy, Debug)]
+pub struct Slots<'a> {
+    /// (slot, KH2 motion).
+    pub map: &'a [(usize, usize)],
+    /// The idle slots whose loop is unrolled ([`UNROLL`]'s role).
+    pub unroll: &'a [usize],
+}
+/// `PL0101.ANN`'s slots ([`CLIP_MAP`], [`UNROLL`]).
+pub const RIKU_SLOTS: Slots<'static> = Slots { map: &CLIP_MAP, unroll: &UNROLL };
+/// A pack whose slots mean other clips: every clip takes KH2's idle sway.
+pub const NO_SLOTS: Slots<'static> = Slots { map: &[], unroll: &[] };
+
+/// [`bake`] with the slots of any pack (0.198.32: Dark Riku's own `PL0201` / `PL0211.ANN`, whose slots are not Riku's:
+/// [`crate::riku_skin::DARK_SLOTS`]).
+pub fn bake_slots(ann: &mut Ann, rig: &Rig, sk: &crate::mdl::RecomSkeleton, head: usize, model: &Model, motions: &HashMap<usize, Kh2Motion>, slots: Slots) -> Result<()> {
     let parents: Vec<i16> = sk.bones.iter().map(|b| b.parent).collect();
     let parents = &parents[..];
     let head_rest = unscale(&sk.rest_world()[head].r).0;
@@ -634,9 +654,9 @@ pub fn bake(ann: &mut Ann, rig: &Rig, sk: &crate::mdl::RecomSkeleton, head: usiz
     for (slot, s) in ann.slots.iter_mut().enumerate() {
         let Some(c) = s.clip.as_mut() else { continue };
         let chans = c.chans();
-        let kh2 = CLIP_MAP.iter().find(|x| by_slot && x.0 == slot).map(|x| x.1);
+        let kh2 = slots.map.iter().find(|x| x.0 == slot).map(|x| x.1);
         // 0.197.6: KH2's idle at its own speed on the event-free idle clips
-        if by_slot && UNROLL.contains(&slot) && kh2 == Some(KH2_IDLE) && c.looped() && c.loop_start == 1 {
+        if slots.unroll.contains(&slot) && kh2 == Some(KH2_IDLE) && c.looped() && c.loop_start == 1 {
             if let Some(k) = unroll_times(c.frames.max(1) as usize, (idle.frame_end - idle.frame_return.min(idle.frame_end)).max(1.0)) {
                 unroll(c, k);
             }

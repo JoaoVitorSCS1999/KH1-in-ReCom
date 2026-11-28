@@ -33,6 +33,7 @@ use std::sync::{Mutex, OnceLock};
 pub static ORIG_GROUP_LOAD: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_CAMP_FIELD: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_PACK_PICK: AtomicUsize = AtomicUsize::new(0);
+pub static ORIG_PACK_SET: AtomicUsize = AtomicUsize::new(0);
 
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 static MODELS: OnceLock<Models> = OnceLock::new();
@@ -92,6 +93,7 @@ type QueueFn = unsafe extern "win64" fn(u32);
 type QueuedFn = unsafe extern "win64" fn(i32, i32) -> u64;
 type FindFn = unsafe extern "win64" fn(u32, u32, i32) -> usize;
 type PackPickFn = unsafe extern "win64" fn(usize, u32, i32, i32, i32) -> u64;
+type PackSetFn = unsafe extern "win64" fn(usize, u32, i32, i32) -> u64;
 type UnloadFn = unsafe extern "win64" fn(u32);
 type NewFn = unsafe extern "win64" fn(usize) -> usize;
 type CtorFn = unsafe extern "win64" fn(usize, usize, i32, u32) -> usize;
@@ -209,6 +211,14 @@ pub fn install(b: usize) {
                 planned
             }
         };
+        // 0.198.32: the battle Dark Riku's pack copies for the KH2 hair (one `.ANN` row each)
+        let planned = match crate::riku_skin::add_event_rows(planned.clone(), super::riku_skin::dark_packs()) {
+            Ok(t) => t,
+            Err(e) => {
+                log(&format!("riku skin: Dark Riku's pack copy rows: {e}; with the KH2 hair his sleights and event motions may not play"));
+                planned
+            }
+        };
         let skin_rows = planned.iter().any(|r| skins.iter().any(|s| s.skin == r.group));
         let Some(table) = build_rows(&planned) else {
             log("keyblades: PLAYER table copy failed; no model swap");
@@ -219,6 +229,7 @@ pub fn install(b: usize) {
             super::hook::Hook { site: site("player group load (0x140211AA0)"), ours: group_load as *const () as usize, original: &ORIG_GROUP_LOAD },
             super::hook::Hook { site: site("field camp open/close (0x1401A9590)"), ours: camp_field as *const () as usize, original: &ORIG_CAMP_FIELD },
             super::hook::Hook { site: site("motion pack pick (0x14024D860)"), ours: pack_pick as *const () as usize, original: &ORIG_PACK_PICK },
+            super::hook::Hook { site: site("motion pack pick, no blend (0x14024ED00)"), ours: pack_set as *const () as usize, original: &ORIG_PACK_SET },
         ];
         if !super::hook::install_all(b, &hooks) {
             log("keyblades: model wrappers not hooked; no model swap");
@@ -290,6 +301,15 @@ pub(super) unsafe fn queue_group(g: u16) {
 /// `0x140211AA0` does for the player's group).
 unsafe fn queue_if_missing(g: u16) -> bool {
     if found(kind::RTM, g) || queued(g) {
+        return false;
+    }
+    func::<QueueFn>(QUEUE_GROUP)(g as u32);
+    true
+}
+
+/// Queues a pack-only group `g` (an `.ANN` row alone, so no `.RTM` to look for) when its pack is not loaded and it is not queued.
+unsafe fn queue_pack_if_missing(g: u16) -> bool {
+    if found(kind::ANN, g) || queued(g) {
         return false;
     }
     func::<QueueFn>(QUEUE_GROUP)(g as u32);
@@ -369,6 +389,14 @@ pub unsafe extern "win64" fn group_load(ch: u32) {
             }
         }
     }
+    // 0.198.32: with the battle Dark Riku on KH2's hair (139 bones), the copies of his 11 packs, so his sleights and event motions play
+    if INSTALLED.load(Ordering::Acquire) && super::stats::riku_story() && super::riku_skin::dark_kh2_hair() {
+        for &(_, alt) in super::riku_skin::dark_packs() {
+            if queue_pack_if_missing(alt) {
+                once(&format!("dpq{alt}"), &format!("riku skin: Dark Riku's pack copy {alt} queued (KH2 hair)"));
+            }
+        }
+    }
     if !INSTALLED.load(Ordering::Acquire) {
         return;
     }
@@ -398,16 +426,34 @@ unsafe fn clip_bones(id: u32, slot: i32) -> Option<i16> {
 /// every case Re:CoM plays itself is unchanged; ids without a copy cost one compare.
 pub unsafe extern "win64" fn pack_pick(ctrl: usize, id: u32, slot: i32, start: i32, p5: i32) -> u64 {
     let f = orig::<PackPickFn>(&ORIG_PACK_PICK);
-    if let Some(alt) = crate::riku_skin::event_alt_id(super::riku_skin::event_packs(), id) {
-        if ctrl != 0 {
-            let want: i16 = rd(ctrl + 0x40);
-            if clip_bones(id, slot).is_some_and(|b| b != want) && clip_bones(alt, slot) == Some(want) {
-                once(&format!("evp{id}"), &format!("riku skin: event pack {id} played from its copy {alt} ({want} bones)"));
-                return f(ctrl, alt, slot, start, p5);
-            }
-        }
+    f(ctrl, copy_for(ctrl, id, slot, "0x14024D860"), slot, start, p5)
+}
+
+/// Re:CoM's "play clip `slot` of pack `id`" without a blend (`0x14024ED00(ctrl, id, slot, start)`: `0x1402A4820(id)` at ctrl +0x28,
+/// then `0x14024D320`; its only caller `0x1401A3580` takes it when the blend is < 0, as most of Dark Riku's sleight calls pass, Checked
+/// (decomp, exe: the call at `0x1401A35F5`, `rcx` = ctrl, `edx` = id, `r8d` = slot, `r9d` = start)). 0.198.32: the same pick as
+/// [`pack_pick`] (the battle Dark Riku's pack copies for the KH2 hair).
+pub unsafe extern "win64" fn pack_set(ctrl: usize, id: u32, slot: i32, start: i32) -> u64 {
+    let f = orig::<PackSetFn>(&ORIG_PACK_SET);
+    f(ctrl, copy_for(ctrl, id, slot, "0x14024ED00"), slot, start)
+}
+
+/// The id to play for pack `id`'s clip `slot` on controller `ctrl`: the copy's (Riku's event packs, 0.197.4; the battle Dark Riku's
+/// packs, 0.198.32) when `id` has one, its clip's bone count differs from the controller's (`ctrl+0x40`, i16) and the copy's clip
+/// matches; else `id`. Re:CoM plays nothing in that case (`0x14024E9F0` skips a clip whose count differs), so every case Re:CoM plays
+/// itself is unchanged; ids without a copy cost two compares.
+unsafe fn copy_for(ctrl: usize, id: u32, slot: i32, at: &str) -> u32 {
+    let (ev, dark) = (super::riku_skin::event_packs(), super::riku_skin::dark_packs());
+    let Some(alt) = crate::riku_skin::event_alt_id(ev, id).or_else(|| crate::riku_skin::event_alt_id(dark, id)) else { return id };
+    if ctrl == 0 {
+        return id;
     }
-    f(ctrl, id, slot, start, p5)
+    let want: i16 = rd(ctrl + 0x40);
+    if clip_bones(id, slot).is_some_and(|b| b != want) && clip_bones(alt, slot) == Some(want) {
+        once(&format!("evp{id}"), &format!("riku skin: pack {id} played from its copy {alt} ({want} bones; {at})"));
+        return alt;
+    }
+    id
 }
 
 /// CPlayerWeapon's model init (vtable `+0x30`, Re:CoM's `0x1401A4E70(weapon, category, group,

@@ -625,8 +625,11 @@ fn run_inner(opt: &Options) -> Result<(), String> {
             }
         }
         let mut event_packs: Vec<(u16, u16)> = vec![];
+        let mut dark_packs: Vec<(u16, u16)> = vec![];
         // 0.188.0: Riku's default attire with KH2 Riku's hair (KH2 FM, the 1.5+2.5 collection). Stage 363: the DDD hair of 0.186.0 is gone.
-        match install::kh2(&game, keys.clone()).map_err(|e| e.to_string()).and_then(|i| kh1_recom_assets::kh2_hair::Kh2HairSource::read(&i).map_err(|e| e.to_string())) {
+        // 0.198.36: the sources kept for the battle's Dark Riku's looks below
+        let kh2_src = install::kh2(&game, keys.clone()).map_err(|e| e.to_string()).and_then(|i| kh1_recom_assets::kh2_hair::Kh2HairSource::read(&i).map_err(|e| e.to_string()));
+        match &kh2_src {
             Ok(hair) => {
                 let heart = install::kh1(&game, keys.clone()).ok().and_then(|i| i.read_full(rsk::BLADE_MODEL).ok()).and_then(|(_, a, _)| rsk::BladeSource::from_assets(&a).ok());
                 for &(target, base, with_heart, atlas) in &rsk::KH2_HAIR_GROUPS {
@@ -634,7 +637,7 @@ fn run_inner(opt: &Options) -> Result<(), String> {
                         println!("note: Riku's KH2 hair with the Keyblade of Heart (group {target}) not built: no Keyblade");
                         continue;
                     }
-                    match rsk::build_hair(&arc, &keys, &have, base, target, if with_heart { heart.as_ref() } else { None }, &hair, &atlas) {
+                    match rsk::build_hair(&arc, &keys, &have, base, target, if with_heart { heart.as_ref() } else { None }, hair, &atlas) {
                         Ok(b) => {
                             for (rel, bytes) in &b.files {
                                 write(&rel.split('/').fold(root.clone(), |p, s| p.join(s)), bytes)?;
@@ -655,7 +658,7 @@ fn run_inner(opt: &Options) -> Result<(), String> {
                         println!("note: Riku's KH2 hair on the Dark Form skin with the Keyblade of Heart (group {target}) not built: no Keyblade");
                         continue;
                     }
-                    match rsk::build_hair_from(&arc, &keys, &have, base, raw_src, true, target, if with_heart { heart.as_ref() } else { None }, &hair, &atlas) {
+                    match rsk::build_hair_from(&arc, &keys, &have, base, raw_src, true, target, if with_heart { heart.as_ref() } else { None }, hair, &atlas) {
                         Ok(b) => {
                             for (rel, bytes) in &b.files {
                                 write(&rel.split('/').fold(root.clone(), |p, s| p.join(s)), bytes)?;
@@ -668,7 +671,7 @@ fn run_inner(opt: &Options) -> Result<(), String> {
                 }
                 // 0.197.4: Riku's event packs for the 109-bone KH2-hair skeleton (the boss end's card get and the other event motions)
                 if done.iter().any(|m| m.hair == 1) {
-                    match rsk::build_event_packs(&arc, &keys, &hair) {
+                    match rsk::build_event_packs(&arc, &keys, hair) {
                         Ok(packs) => {
                             for (src, alt, bytes) in packs {
                                 write(&rsk::path(alt, "ANN").split('/').fold(root.clone(), |p, s| p.join(s)), &bytes)?;
@@ -683,7 +686,8 @@ fn run_inner(opt: &Options) -> Result<(), String> {
             Err(e) => println!("note: KH2 Riku's model not read: Riku's KH2 hair not built: {e}"),
         }
         // 0.194.0: the same with BBS kid Riku's hair (BBS FM, the 1.5+2.5 collection).
-        match kh1_recom_assets::bbs_hair::BbsHairSource::read(&game, &keys) {
+        let bbs_src = kh1_recom_assets::bbs_hair::BbsHairSource::read(&game, &keys);
+        match &bbs_src {
             Ok(hair) => {
                 let heart = install::kh1(&game, keys.clone()).ok().and_then(|i| i.read_full(rsk::BLADE_MODEL).ok()).and_then(|(_, a, _)| rsk::BladeSource::from_assets(&a).ok());
                 for &(target, base, with_heart, atlas) in &rsk::BBS_HAIR_GROUPS {
@@ -691,7 +695,7 @@ fn run_inner(opt: &Options) -> Result<(), String> {
                         println!("note: Riku's BBS kid hair with the Keyblade of Heart (group {target}) not built: no Keyblade");
                         continue;
                     }
-                    match rsk::build_hair(&arc, &keys, &have, base, target, if with_heart { heart.as_ref() } else { None }, &hair, &atlas) {
+                    match rsk::build_hair(&arc, &keys, &have, base, target, if with_heart { heart.as_ref() } else { None }, hair, &atlas) {
                         Ok(b) => {
                             for (rel, bytes) in &b.files {
                                 write(&rel.split('/').fold(root.clone(), |p, s| p.join(s)), bytes)?;
@@ -712,7 +716,7 @@ fn run_inner(opt: &Options) -> Result<(), String> {
                         println!("note: Riku's BBS kid hair on the Dark Form skin with the Keyblade of Heart (group {target}) not built: no Keyblade");
                         continue;
                     }
-                    match rsk::build_hair_from(&arc, &keys, &have, base, raw_src, true, target, if with_heart { heart.as_ref() } else { None }, &hair, &atlas) {
+                    match rsk::build_hair_from(&arc, &keys, &have, base, raw_src, true, target, if with_heart { heart.as_ref() } else { None }, hair, &atlas) {
                         Ok(b) => {
                             for (rel, bytes) in &b.files {
                                 write(&rel.split('/').fold(root.clone(), |p, s| p.join(s)), bytes)?;
@@ -726,12 +730,55 @@ fn run_inner(opt: &Options) -> Result<(), String> {
             }
             Err(e) => println!("note: BBS kid Riku's model not read: Riku's BBS kid hair not built: {e}"),
         }
+        // 0.198.30 / 0.198.32 / 0.198.36 (fork owner, 2026-11-27: "no darkmode a keyblade tbm nn troca, já coloca essas regrs para o futuro"):
+        // the battle's Dark Mode (Re:CoM's Dark Riku, 201 / 211: his own model and pack, as this step wrote them above) in every look of
+        // `DARK_MODE_LOOKS` (hair × Keyblade), one builder for all; the KH2 rows (139 bones) only with every copy of his 11 other packs
+        // (a sleight would freeze him), the copies written once for all of them
+        {
+            let heart = install::kh1(&game, keys.clone()).ok().and_then(|i| i.read_full(rsk::BLADE_MODEL).ok()).and_then(|(_, a, _)| rsk::BladeSource::from_assets(&a).ok());
+            let (kh2, bbs) = (kh2_src.as_ref().ok(), bbs_src.as_ref().ok());
+            let packs = match kh2.map(|h| rsk::build_dark_packs(&arc, &keys, rsk::DARK_MODE_GROUPS[0], h)) {
+                Some(Ok(p)) => Some(p),
+                Some(Err(e)) => {
+                    println!("note: the battle's Dark Riku's packs for the KH2 hair not built ({e}): he keeps Re:CoM's hair with it");
+                    None
+                }
+                None => None,
+            };
+            let mut groups = vec![];
+            for look in rsk::DARK_MODE_LOOKS {
+                let (target, dark, hair, blade) = look;
+                let what = rsk::dark_look_name(hair, blade);
+                if hair == 1 && packs.is_none() {
+                    println!("note: the battle's Dark Riku with {what} (group {target}) not built: no KH2 pack copies");
+                    continue;
+                }
+                match rsk::build_dark_mode(&arc, &keys, &have, look, kh2, bbs, heart.as_ref()) {
+                    Ok(b) => {
+                        for (rel, bytes) in &b.files {
+                            write(&rel.split('/').fold(root.clone(), |p, s| p.join(s)), bytes)?;
+                        }
+                        println!("the battle's Dark Riku: group {target} = group {dark} with {what} ({} clips)", b.clips);
+                        groups.push(Made { riku: dark, skin: target, dark: true, blade, hair });
+                    }
+                    Err(e) => println!("note: the battle's Dark Riku with {what} (group {target}) not built: {e}"),
+                }
+            }
+            if let Some(packs) = packs.filter(|_| groups.iter().any(|m| m.hair == 1)) {
+                for (src, alt, bytes) in packs {
+                    write(&rsk::path(alt, "ANN").split('/').fold(root.clone(), |p, s| p.join(s)), &bytes)?;
+                    dark_packs.push((src, alt));
+                }
+                println!("the battle's Dark Riku's packs for the KH2 hair: {dark_packs:?}");
+            }
+            done.extend(groups);
+        }
         if done.is_empty() {
             if manifest.is_file() {
                 std::fs::remove_file(&manifest).map_err(|e| format!("{}: {e}", manifest.display()))?;
             }
         } else {
-            write(&manifest, kh1_recom_assets::riku_skin::manifest_json(&done, sora_guard.is_some(), &event_packs).as_bytes())?;
+            write(&manifest, kh1_recom_assets::riku_skin::manifest_json(&done, sora_guard.is_some(), &event_packs, &dark_packs).as_bytes())?;
         }
     }
     // M13 stage 3: KH1's trails and finisher effects as Re:CoM's EET events at the KH1 variant
